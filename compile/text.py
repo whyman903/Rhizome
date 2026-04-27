@@ -303,12 +303,6 @@ def _pdf_placeholder(title: str) -> ExtractedSource:
     )
 
 
-def pdf_placeholder_source(path_or_title: Path | str) -> ExtractedSource:
-    if isinstance(path_or_title, Path):
-        return _pdf_placeholder(title_from_path(path_or_title))
-    return _pdf_placeholder(str(path_or_title).strip() or "Untitled")
-
-
 def source_from_pdf_pages(
     title: str,
     page_texts: tuple[ExtractedPageText, ...],

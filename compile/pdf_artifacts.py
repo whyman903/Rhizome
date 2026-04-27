@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -32,25 +32,7 @@ class ExtractedArtifact:
     pages: tuple[ExtractedPageText, ...]
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "raw_path": self.raw_path,
-            "raw_sha256": self.raw_sha256,
-            "media_type": self.media_type,
-            "extractor_name": self.extractor_name,
-            "extractor_version": self.extractor_version,
-            "extracted_at": self.extracted_at,
-            "extraction_mode": self.extraction_mode,
-            "requires_document_review": self.requires_document_review,
-            "warnings": list(self.warnings),
-            "pages": [
-                {
-                    "page_number": page.page_number,
-                    "text": page.text,
-                }
-                for page in self.pages
-            ],
-        }
+        return asdict(self)
 
 
 def compute_sha256(path: Path) -> str:
