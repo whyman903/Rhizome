@@ -22,3 +22,4 @@ DerivedData/
 
 # Keep SwiftPM dependency resolution pinned for the app target.
 !MyWiki/Package.resolved
+evals/

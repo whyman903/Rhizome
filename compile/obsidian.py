@@ -43,6 +43,7 @@ IGNORED_DIRS = {
     "__pycache__",
     "build",
     "dist",
+    "evals",
     "node_modules",
 }
 

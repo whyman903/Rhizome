@@ -12,6 +12,14 @@ from rich.table import Table
 
 from compile.config import load_config
 from compile.dates import now_frontmatter
+from compile.evals import (
+    EvalSuiteError,
+    build_run_output_path,
+    load_eval_suite,
+    run_eval_suite,
+    write_run_output,
+    write_starter_suite,
+)
 from compile.fetch import fetch_url
 from compile.ingest import (
     build_ingest_artifact,
@@ -1321,6 +1329,141 @@ def render_canvas(
     write_overview(config, pages_by_type)
     append_log_entry(config, "render", title, ["Format: canvas", f"Canvas: {rel_canvas}", f"Page: {page.relative_path}"])
     console.print(f"[green]Canvas created:[/green] {rel_canvas} → {page.relative_path}")
+
+
+# --- Query evals ---
+
+@main.group("eval")
+def eval_group() -> None:
+    """Manual headless query evals for a wiki workspace."""
+
+
+@eval_group.command("init")
+@click.argument("name", default="query-quality")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--force", is_flag=True, help="Overwrite an existing eval suite.")
+def eval_init(name: str, path: str, force: bool) -> None:
+    """Create a starter prompt-only eval suite."""
+    try:
+        config = load_config(Path(path).expanduser().resolve())
+        suite_path = write_starter_suite(config, name, force=force)
+    except (FileNotFoundError, EvalSuiteError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1)
+    console.print(f"[green]Eval suite created:[/green] {suite_path}")
+
+
+@eval_group.command("run")
+@click.argument("suite")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--dry-run", is_flag=True, help="Validate and print the suite without calling Claude.")
+@click.option("--limit", type=click.IntRange(min=1), default=None, help="Run only the first N queries.")
+@click.option(
+    "--timeout-seconds",
+    type=click.FloatRange(min=0.001),
+    default=600.0,
+    show_default=True,
+    help="Per-query Claude timeout.",
+)
+@click.option("--claude", "claude_executable", default="claude", show_default=True, help="Claude executable to run.")
+@click.option(
+    "--concurrency",
+    type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
+    help="Maximum number of queries to run in parallel.",
+)
+@click.option(
+    "--runs-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    envvar="COMPILE_EVAL_RUNS_DIR",
+    default=None,
+    help=(
+        "Directory for run JSON + markdown reports. "
+        "Defaults to ./evals/runs/ (relative to the current working directory). "
+        "Falls back to the COMPILE_EVAL_RUNS_DIR env var."
+    ),
+)
+@click.option(
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Explicit run JSON output path. Overrides --runs-dir. "
+        "Defaults to ./evals/runs/<timestamp>-<suite>.json."
+    ),
+)
+def eval_run(
+    suite: str,
+    path: str,
+    dry_run: bool,
+    limit: int | None,
+    timeout_seconds: float,
+    claude_executable: str,
+    concurrency: int,
+    runs_dir: Path | None,
+    output: Path | None,
+) -> None:
+    """Run a prompt-only eval suite through headless Claude Code."""
+    try:
+        config = load_config(Path(path).expanduser().resolve())
+        eval_suite = load_eval_suite(config, suite)
+    except (FileNotFoundError, EvalSuiteError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1)
+
+    queries = eval_suite.queries[:limit] if limit is not None else eval_suite.queries
+    runs_dir_resolved = runs_dir.expanduser().resolve() if runs_dir is not None else None
+    if dry_run:
+        console.print(f"[bold]{eval_suite.name}[/bold] — {len(queries)} query(ies)")
+        console.print(f"Suite: {eval_suite.path}")
+        if output is not None:
+            console.print(f"Output: {output.expanduser().resolve()}")
+        else:
+            console.print(
+                f"Default output: "
+                f"{build_run_output_path(eval_suite.name, runs_dir=runs_dir_resolved)}"
+            )
+        for index, item in enumerate(queries, start=1):
+            console.print(f"{index:>2}. {item['id']}: {item['query']}")
+        return
+
+    def progress(
+        completed: int,
+        total: int,
+        item: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        duration_ms = result.get("durationMs")
+        seconds = (
+            f"{duration_ms / 1000:.1f}s"
+            if isinstance(duration_ms, int)
+            else "?"
+        )
+        console.print(
+            f"[cyan]eval {completed}/{total}[/cyan] {item['id']}: "
+            f"{result['status']} in {seconds}"
+        )
+
+    payload = run_eval_suite(
+        config,
+        eval_suite,
+        limit=limit,
+        timeout_seconds=timeout_seconds,
+        claude_executable=claude_executable,
+        concurrency=concurrency,
+        progress=progress,
+    )
+    output_path = output.expanduser().resolve() if output is not None else None
+    run_path = write_run_output(
+        payload, output_path, runs_dir=runs_dir_resolved,
+    )
+    summary = payload["summary"]
+    console.print(
+        f"[green]Eval run written:[/green] {run_path} "
+        f"({summary['completed']} completed, {summary['failed']} failed)"
+    )
+    console.print(f"[green]Readable report:[/green] {run_path.with_suffix('.md')}")
 
 
 # --- Claude Code integration ---

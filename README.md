@@ -22,6 +22,7 @@ Under the hood, MyWiki runs `claude -p` as an agentic research session against y
 - `compile ingest <file>` — register a raw source and create a source note
 - `compile obsidian search | page | neighbors` — programmatic wiki reads
 - `compile render canvas | marp | chart` — explicit rich-output renderers
+- `compile eval init | run` — manual headless query eval suites with judge-ready JSON output
 - `compile health`, `compile obsidian refresh` — lint and reindex
 
 ---
