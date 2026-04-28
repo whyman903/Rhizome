@@ -1,25 +1,52 @@
 .DS_Store
+
+# Local editor / agent state
+.claude/
+.vscode/
+.idea/
+
+# Python
 .pytest_cache/
 .ruff_cache/
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.tox/
+.nox/
+
+# Local environment
 .env
 .env.*
 data/
 .playwright-cli/
+*.log
 
 # Swift / app build artifacts
 .build/
 dist/
 .swiftpm/
+*.app/
+*.dSYM/
+*.xcarchive/
 
 # Xcode local state
 DerivedData/
 *.xcuserstate
+*.xcuserdatad/
+*.xcactivitylog
+xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 
 # Keep SwiftPM dependency resolution pinned for the app target.
 !MyWiki/Package.resolved
+
+# Local evaluation scratch space
 evals/

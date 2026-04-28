@@ -141,7 +141,7 @@ struct QueryDetailView: View {
     private func turnView(_ turn: QueryTurn) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             questionHeader(turn.question)
-            MarkdownContentView(text: turn.answer) { target in
+            MarkdownContentView(text: turn.answer, workspaceURL: model.workspace?.url) { target in
                 model.openWikiPage(target: target)
             }
             .padding(.leading, 15)
@@ -181,7 +181,7 @@ struct QueryDetailView: View {
                     .textSelection(.enabled)
                     .padding(.leading, 15)
             } else if !model.querySession.assistantText.isEmpty {
-                MarkdownContentView(text: model.querySession.assistantText) { target in
+                MarkdownContentView(text: model.querySession.assistantText, workspaceURL: model.workspace?.url) { target in
                     model.openWikiPage(target: target)
                 }
                 .padding(.leading, 15)

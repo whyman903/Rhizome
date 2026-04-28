@@ -26,7 +26,10 @@ let package = Package(
                 .product(name: "cmark-gfm-extensions", package: "swift-cmark"),
             ],
             path: "Sources/MyWikiApp",
-            resources: [.copy("Resources/AppIcon.icns")]
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+                .copy("Resources/web"),
+            ]
         ),
         .testTarget(
             name: "MyWikiCoreTests",

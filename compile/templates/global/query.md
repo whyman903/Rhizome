@@ -49,7 +49,7 @@ Do not ask the user which command to use. Only ask a follow-up if both the curre
    - Teaching explanation or presentation request → structured prose or Mermaid; use `compile render marp` only when the user asks to build a deck
    - Quantitative data, trends, or distributions → table or inline recommendation; use `compile render chart` only when the user asks for a chart artifact
    - None of the above → standard text, with `[[wikilinks]]` only where the wiki supports a claim
-   Use callouts (`> [!note]`, `> [!warning]`, `> [!question]`) for key insights, caveats, or definitions when they add clarity. For math, use LaTeX math notation, not Unicode math symbols.
+   Use callouts (`> [!note]`, `> [!warning]`, `> [!question]`) for key insights, caveats, or definitions when they add clarity. For math, use KaTeX-compatible LaTeX math notation, not Unicode math symbols. Inline math must include literal backslash delimiters like `\(...\)`, not bare `( ... )`; use `$$...$$` or `\[...\]` for display math. Use explicit subscripts/superscripts such as `x_s`, `\hat{S}_{ij}`, and `\sum_{i=1}^{h}`. Do not emit malformed TeX like `\hat{S}{ij}`, `\mathbf{x}s`, `\sum{i=1}^{h}`, or `\text{softmax}{...}` when you mean a subscript or operator argument.
 
 7. Present the answer in the right register. Match brief or casual wording with concise prose. Do not use todo/planning tools; answer directly.
 

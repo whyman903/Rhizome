@@ -96,7 +96,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         - Use markdown tables for comparisons, tradeoffs, timelines, or grouped evidence.
         - Use Mermaid diagrams for compact process flows, causal chains, or relationship maps.
         - Use Obsidian callouts for notable caveats, open questions, or recommendations when they add clarity.
-        - Use LaTeX math notation, not Unicode math symbols.
+        - Use KaTeX-compatible LaTeX math notation, not Unicode math symbols. Inline math must include literal backslash delimiters like `\\(...\\)`, not bare `( ... )`; use `$$...$$` or `\\[...\\]` for display math. Use explicit subscripts/superscripts such as `x_s`, `\\hat{S}_{ij}`, and `\\sum_{i=1}^{h}`. Do not emit malformed TeX like `\\hat{S}{ij}`, `\\mathbf{x}s`, `\\sum{i=1}^{h}`, or `\\text{softmax}{...}` when you mean a subscript or operator argument.
 
         Use the right research pattern for the request:
         - For "explain the difference between X and Y", search each term and likely aliases, then compare the best wiki evidence.
