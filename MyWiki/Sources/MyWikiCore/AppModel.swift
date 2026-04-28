@@ -662,7 +662,7 @@ public final class AppModel {
         """
         Your previous answer was discarded because it did not use any research tools. Retry the request below.
 
-        Before answering, use at least one content research tool: Bash, Grep, Glob, Read, Task, WebSearch, or WebFetch. LS is allowed for navigation, but it does not count by itself. Search the local wiki first unless the request is explicitly about external or current information. Keep Bash output focused with search excerpts or bounded page reads instead of dumping long files unless the full text is essential. If you conclude the topic is not in the wiki, briefly state what you searched.
+        Before answering, use at least one content research tool: Bash, Grep, Glob, Read, Task, WebSearch, or WebFetch. LS is allowed for navigation, but it does not count by itself. Search the local wiki first unless the request is explicitly about external or current information. Keep Bash output focused with search excerpts or bounded page reads instead of dumping long files unless the full text is essential. If you conclude the topic is not in the wiki, use both `compile obsidian search` and direct wiki/raw file search, then briefly state what you searched.
 
         Request:
         \(prompt)
@@ -673,7 +673,7 @@ public final class AppModel {
         """
         Your previous research run used tools but Claude Code exited before producing a final answer. Retry the request below.
 
-        Use research tools as needed, keep Bash output focused with search excerpts or bounded page reads, and then produce the final answer. Search the local wiki first unless the request is explicitly about external or current information. If you conclude the topic is not in the wiki, briefly state what you searched.
+        Use research tools as needed, keep Bash output focused with search excerpts or bounded page reads, and then produce the final answer. Search the local wiki first unless the request is explicitly about external or current information. If you conclude the topic is not in the wiki, use both `compile obsidian search` and direct wiki/raw file search, then briefly state what you searched.
 
         Request:
         \(prompt)

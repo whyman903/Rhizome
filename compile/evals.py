@@ -33,6 +33,46 @@ MAX_TOOL_RESULT_PREVIEW_CHARS = 1_500
 MAX_STDERR_CHARS = 8_000
 MAX_UNPARSED_STDOUT_CHARS = 8_000
 
+SAVE_OFFER_RE = re.compile(
+    r"(\b(?:want me to|would you like me to|do you want me to|should i|shall i)\b"
+    r"[^.\n?!]{0,200}\b(?:save|file|persist|write|add|output page)\b|"
+    r"\bsave (?:this|it) (?:as|to)\b|\bfile this\b)",
+    re.IGNORECASE,
+)
+ABSENCE_RE = re.compile(
+    r"(not in (?:your|the) wiki|no (?:notes|content|coverage|hits)|nothing in (?:your|the) wiki|"
+    r"wiki (?:has|contains) no|answering from general knowledge|general knowledge summary)",
+    re.IGNORECASE,
+)
+SAVED_CLAIM_RE = re.compile(
+    r"(saved to the wiki|built and saved|created:\s*`?wiki/|"
+    r"\b(?:deck|chart|canvas|artifact|output|page|file|answer|result|slides?)\b"
+    r"[^.\n]{0,80}\bis in\s+`?wiki/outputs\b|"
+    r"\bthe\s+[^.\n]{0,80}"
+    r"\b(?:deck|chart|canvas|artifact|output|page|file|answer|result|slides?)\b"
+    r"[^.\n]{0,80}\bis in\s+`?wiki/outputs\b)",
+    re.IGNORECASE,
+)
+FRESHNESS_CLAIM_RE = re.compile(
+    r"(\b(currently|latest|newest|recent(?:ly)?|today|tonight|up[- ]?to[- ]?date)\b|"
+    r"\b(?:this|last)\s+(?:week|month|year)\b|"
+    r"\bas\s+of\b|"
+    r"\bcurrent\s+state\b)",
+    re.IGNORECASE,
+)
+SOURCE_ACCOUNTING_RE = re.compile(
+    r"(which sources support which (?:moves?|claims?|steps?|parts?|arguments?)|source accounting|"
+    r"which sources push (?:against|back)|sources push against the framing)",
+    re.IGNORECASE,
+)
+
+INVENTORY_QUERY_RE = re.compile(
+    r"(\bhow many\b|\bcount(?:s|ed|ing)?\b|\blist (?:every|all)\b|"
+    r"\bfind all\b|\bduplicates?\b|\bmost source\b|\bwhat did i add\b|"
+    r"\ball source notes\b)",
+    re.IGNORECASE,
+)
+
 
 # Each query is shaped to probe a distinct *pattern* of question, not just a
 # distinct topic. The set spans short factual lookups, casual chat tone,
@@ -372,6 +412,7 @@ def run_eval_suite(
     finished = _utc_now()
     completed = sum(1 for result in results if result["status"] == "completed")
     failed = len(results) - completed
+    workflow_flags = _workflow_flag_summary(results)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "kind": "compile.query-eval.run",
@@ -406,6 +447,7 @@ def run_eval_suite(
             "completed": completed,
             "failed": failed,
         },
+        "workflowFlags": workflow_flags,
         "results": results,
         "judgePacket": build_judge_packet(),
     }
@@ -516,6 +558,12 @@ def run_eval_query(
             combined["attempt"] = attempt["attempt"]
             all_tool_calls.append(combined)
 
+    workflow_flags = analyze_workflow_flags(
+        query=item["query"],
+        answer=final.get("answer") or "",
+        tool_calls=all_tool_calls,
+    )
+
     return {
         "id": item["id"],
         "query": item["query"],
@@ -528,7 +576,319 @@ def run_eval_query(
         "permissionDenials": final.get("permissionDenials", []),
         "attempts": attempts,
         "toolCalls": all_tool_calls,
+        "workflowFlags": workflow_flags,
     }
+
+
+def analyze_workflow_flags(
+    *,
+    query: str,
+    answer: str,
+    tool_calls: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Cheap static workflow checks for query eval runs.
+
+    These are heuristic guardrails, not a judge. They surface the workflow leaks
+    that completion status hides: noisy save offers, weak absence searches,
+    stale general-knowledge fallbacks, render/save contradictions, and search
+    thrash on inventory questions.
+    """
+    flags: list[dict[str, str]] = []
+    save_offer = _has_save_offer(answer)
+    absence_claim = _has_absence_claim(answer)
+    render_or_save = _saw_render_or_save_command(tool_calls)
+
+    if save_offer and (_is_brief_or_casual_query(query) or absence_claim):
+        flags.append(_workflow_flag(
+            "trivial_or_absence_save_offer",
+            "Brief, casual, or absence-style answer ended with a save/output-page offer.",
+        ))
+
+    if absence_claim:
+        saw_obsidian = _saw_obsidian_search(tool_calls)
+        saw_direct = _saw_direct_file_search(tool_calls)
+        if not (saw_obsidian and saw_direct):
+            flags.append(_workflow_flag(
+                "absence_without_raw_or_wiki_grep",
+                "Answer claims missing wiki coverage without both `compile obsidian search` and direct wiki/raw file search.",
+            ))
+
+    if absence_claim and _has_freshness_claim(query, answer) and not _saw_web_tool(tool_calls):
+        flags.append(_workflow_flag(
+            "freshness_claim_without_web",
+            "Out-of-wiki answer made a current/recent/as-of freshness claim without WebSearch/WebFetch.",
+        ))
+
+    if render_or_save and save_offer:
+        flags.append(_workflow_flag(
+            "artifact_saved_then_save_offer",
+            "A render/save command ran, but the final answer still asks whether to save.",
+        ))
+
+    if _answer_claims_saved(answer) and not render_or_save:
+        flags.append(_workflow_flag(
+            "false_or_unverified_save_claim",
+            "Answer claims a file/artifact was saved, but no render/upsert-style command was captured.",
+        ))
+
+    if _is_inventory_query(query):
+        if len(tool_calls) > 10:
+            flags.append(_workflow_flag(
+                "inventory_search_budget_exceeded",
+                "Inventory/count/dedup query used more than 10 tool calls.",
+            ))
+        if len(tool_calls) > 5 and not _saw_aggregation_command(tool_calls):
+            flags.append(_workflow_flag(
+                "inventory_without_aggregation",
+                "Inventory/count/dedup query used many tools without a broad aggregation command.",
+            ))
+
+    if SOURCE_ACCOUNTING_RE.search(query):
+        names = _source_names_in_query(query)
+        if names:
+            read_names = _source_names_read(names, tool_calls)
+            minimum = max(1, len(names) // 2)
+            if len(read_names) < minimum:
+                missing = ", ".join(name for name in names if name not in read_names)
+                flags.append(_workflow_flag(
+                    "source_accounting_missing_named_sources",
+                    f"Source-accounting query did not appear to read enough named source notes. Missing/unclear: {missing}.",
+                ))
+
+    return flags
+
+
+def _workflow_flag(code: str, message: str, severity: str = "warn") -> dict[str, str]:
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+    }
+
+
+def _workflow_flag_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    by_code: dict[str, int] = {}
+    total = 0
+    flagged_results = 0
+    for result in results:
+        flags = result.get("workflowFlags") or []
+        if not flags:
+            continue
+        flagged_results += 1
+        total += len(flags)
+        for flag in flags:
+            if not isinstance(flag, dict):
+                continue
+            code = str(flag.get("code") or "unknown")
+            by_code[code] = by_code.get(code, 0) + 1
+    return {
+        "total": total,
+        "flaggedResults": flagged_results,
+        "byCode": dict(sorted(by_code.items())),
+    }
+
+
+def _has_save_offer(answer: str) -> bool:
+    return bool(SAVE_OFFER_RE.search(answer))
+
+
+def _has_absence_claim(answer: str) -> bool:
+    return bool(ABSENCE_RE.search(answer))
+
+
+def _answer_claims_saved(answer: str) -> bool:
+    return bool(SAVED_CLAIM_RE.search(answer))
+
+
+def _has_freshness_claim(query: str, answer: str) -> bool:
+    return bool(FRESHNESS_CLAIM_RE.search(f"{query}\n{answer}"))
+
+
+def _is_brief_or_casual_query(query: str) -> bool:
+    text = query.lower()
+    return (
+        "couple sentences" in text
+        or "brief" in text
+        or "quick" in text
+        or "remind me" in text
+        or "what's the deal" in text
+        or "what is the deal" in text
+    )
+
+
+def _is_inventory_query(query: str) -> bool:
+    return bool(INVENTORY_QUERY_RE.search(query))
+
+
+def _tool_input_text(call: dict[str, Any]) -> str:
+    raw_input = call.get("input")
+    if isinstance(raw_input, str):
+        return raw_input
+    try:
+        return json.dumps(raw_input or {}, sort_keys=True)
+    except TypeError:
+        return str(raw_input or "")
+
+
+def _bash_commands(tool_calls: list[dict[str, Any]]) -> list[str]:
+    commands: list[str] = []
+    for call in tool_calls:
+        if call.get("name") != "Bash":
+            continue
+        raw_input = call.get("input")
+        if isinstance(raw_input, dict):
+            command = raw_input.get("command")
+            if isinstance(command, str):
+                commands.append(command)
+        elif isinstance(raw_input, str):
+            commands.append(raw_input)
+    return commands
+
+
+def _saw_obsidian_search(tool_calls: list[dict[str, Any]]) -> bool:
+    return any("compile obsidian search" in command.lower() for command in _bash_commands(tool_calls))
+
+
+def _saw_direct_file_search(tool_calls: list[dict[str, Any]]) -> bool:
+    for call in tool_calls:
+        if call.get("name") in {"Grep", "Glob"} and _tool_call_targets_wiki_or_raw(call):
+            return True
+    for command in _bash_commands(tool_calls):
+        text = command.lower()
+        if re.search(r"\b(rg|grep|find)\b", text) and _mentions_wiki_or_raw(text):
+            return True
+    return False
+
+
+def _tool_call_targets_wiki_or_raw(call: dict[str, Any]) -> bool:
+    raw_input = call.get("input")
+    name = call.get("name")
+    if isinstance(raw_input, dict):
+        fields: list[Any] = [raw_input.get("preview")]
+        if name == "Grep":
+            fields.extend([raw_input.get("path"), raw_input.get("glob")])
+        elif name == "Glob":
+            fields.extend([raw_input.get("pattern"), raw_input.get("path")])
+        return any(isinstance(field, str) and _mentions_wiki_or_raw(field) for field in fields)
+    return _mentions_wiki_or_raw(str(raw_input or ""))
+
+
+def _mentions_wiki_or_raw(text: str) -> bool:
+    return bool(re.search(r"(?:^|[^\w-])(?:wiki|raw)(?:[/\\]|$|[^\w-])", text.lower()))
+
+
+def _saw_web_tool(tool_calls: list[dict[str, Any]]) -> bool:
+    return any(call.get("name") in {"WebSearch", "WebFetch"} for call in tool_calls)
+
+
+def _saw_render_or_save_command(tool_calls: list[dict[str, Any]]) -> bool:
+    for command in _bash_commands(tool_calls):
+        text = command.lower()
+        if (
+            re.search(r"\bcompile\s+render\b", text)
+            or re.search(r"\bcompile\s+obsidian\s+upsert\b", text)
+            or re.search(r"\bcompile\s+ingest\b", text)
+        ):
+            return True
+    return False
+
+
+def _saw_aggregation_command(tool_calls: list[dict[str, Any]]) -> bool:
+    for call in tool_calls:
+        if call.get("name") in {"Grep", "Glob"}:
+            return True
+    for command in _bash_commands(tool_calls):
+        text = command.lower()
+        if any(
+            re.search(pattern, text)
+            for pattern in (
+                r"(?:^|[;&|]\s*)rg\s+(?:-[^\s]*l[^\s]*|--files\b)",
+                r"(?:^|[;&|]\s*)grep\s+-[^\s]*(?:r[^\s]*(?:l|h)|(?:l|h)[^\s]*r)[^\s]*\b",
+                r"\^sources:",
+                r"(?:^|[;&|]\s*)find\s+",
+                r"(?:^|[;&|]\s*)wc\s+-l\b",
+                r"(?:^|[;&|]\s*)ls\s+",
+            )
+        ):
+            return True
+    return False
+
+
+def _source_names_in_query(query: str) -> list[str]:
+    candidates: list[str] = []
+
+    # Prefer the part of the question that usually lists the requested sources,
+    # but keep this generic: no domain-specific source names or aliases.
+    search_area = query
+    if ":" in query:
+        search_area = query.rsplit(":", 1)[1]
+
+    for match in re.finditer(r"['\"]([^'\"]{2,80})['\"]", search_area):
+        candidates.append(match.group(1))
+
+    for chunk in re.split(r",|;|\band\b|&", search_area):
+        chunk = re.sub(r"\([^)]*\)", " ", chunk).strip(" .—-")
+        if not chunk:
+            continue
+        for match in re.finditer(
+            r"\b(?:[A-Z][\wÀ-ÖØ-öø-ÿ'’-]*|[A-Z]{2,})(?:\s+(?:[A-Z][\wÀ-ÖØ-öø-ÿ'’-]*|[A-Z]{2,}))*\b",
+            chunk,
+        ):
+            phrase = match.group(0).strip()
+            if _looks_like_source_mention(phrase):
+                candidates.append(phrase)
+
+    seen: set[str] = set()
+    names: list[str] = []
+    for candidate in candidates:
+        normalized = _normalize_source_term(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        names.append(candidate.strip())
+    return names
+
+
+def _source_names_read(names: list[str], tool_calls: list[dict[str, Any]]) -> set[str]:
+    read_texts: list[str] = []
+    for call in tool_calls:
+        name = call.get("name")
+        input_text = _tool_input_text(call).lower()
+        if name == "Read":
+            read_texts.append(input_text)
+        elif name == "Bash" and "compile obsidian page" in input_text:
+            read_texts.append(input_text)
+
+    joined = "\n".join(read_texts)
+    read_names: set[str] = set()
+    for source_name in names:
+        if _normalize_source_term(source_name) in _normalize_source_term(joined):
+            read_names.add(source_name)
+    return read_names
+
+
+def _looks_like_source_mention(value: str) -> bool:
+    normalized = _normalize_source_term(value)
+    if len(normalized) < 3:
+        return False
+    generic = {
+        "what",
+        "which",
+        "show",
+        "source",
+        "sources",
+        "moves",
+        "support",
+        "against",
+        "framing",
+        "paper",
+        "argument",
+    }
+    return normalized not in generic
+
+
+def _normalize_source_term(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
 def run_claude_attempt(
@@ -730,8 +1090,10 @@ def build_judge_packet() -> dict[str, Any]:
             "tool inputs, and result previews. Score whether the assistant answered directly, "
             "searched the wiki first, cited wiki-backed claims with [[wikilinks]], handled absent "
             "or partial wiki coverage honestly, stayed factually consistent with evidence, chose "
-            "a useful format, and avoided false refusals, knowledge-cutoff excuses, or claims that "
-            "it saved or modified files."
+            "a useful format, matched the user's register, chose the right save/follow-up target, "
+            "used efficient inventory/search workflows, respected render/save consent, and avoided "
+            "false refusals, knowledge-cutoff excuses, or unverified claims that it saved or "
+            "modified files."
         ),
         "scoreScale": {
             "1": "Poor: misses the query, fails to research, fabricates, or refuses incorrectly.",
@@ -747,6 +1109,11 @@ def build_judge_packet() -> dict[str, Any]:
             "absenceOrPartialCoverageHandling",
             "factualConsistencyWithEvidence",
             "formatUsefulness",
+            "saveTargetCorrectness",
+            "absenceSearchSufficiency",
+            "inventorySearchEfficiency",
+            "renderSaveConsentConsistency",
+            "registerFit",
             "avoidanceOfRefusalsAndFalseSaveClaims",
         ],
         "requestedOutputSchema": {
@@ -762,6 +1129,11 @@ def build_judge_packet() -> dict[str, Any]:
                         "absenceOrPartialCoverageHandling": "integer 1-5",
                         "factualConsistencyWithEvidence": "integer 1-5",
                         "formatUsefulness": "integer 1-5",
+                        "saveTargetCorrectness": "integer 1-5",
+                        "absenceSearchSufficiency": "integer 1-5",
+                        "inventorySearchEfficiency": "integer 1-5",
+                        "renderSaveConsentConsistency": "integer 1-5",
+                        "registerFit": "integer 1-5",
                         "avoidanceOfRefusalsAndFalseSaveClaims": "integer 1-5",
                     },
                     "strengths": ["string"],
@@ -842,6 +1214,17 @@ def render_run_markdown(payload: dict[str, Any]) -> str:
         if result.get("error"):
             lines.append(f"> [!warning] Error: {result['error']}")
             lines.append("")
+        workflow_flags = result.get("workflowFlags") or []
+        if workflow_flags:
+            lines.append("**Workflow flags:**")
+            lines.append("")
+            for flag in workflow_flags:
+                if not isinstance(flag, dict):
+                    continue
+                code = flag.get("code") or "unknown"
+                message = flag.get("message") or ""
+                lines.append(f"- `{code}` — {message}")
+            lines.append("")
         lines.append("**Answer:**")
         lines.append("")
         lines.append(result.get("answer") or "_(empty)_")
@@ -876,7 +1259,8 @@ def research_required_retry_prompt(prompt: str) -> str:
         "by itself. Search the local wiki first unless the request is explicitly about "
         "external or current information. Keep Bash output focused with search excerpts or "
         "bounded page reads instead of dumping long files unless the full text is essential. "
-        "If you conclude the topic is not in the wiki, briefly state what you searched.\n\n"
+        "If you conclude the topic is not in the wiki, use both `compile obsidian search` "
+        "and direct wiki/raw file search, then briefly state what you searched.\n\n"
         f"Request:\n{prompt}"
     )
 
@@ -888,7 +1272,8 @@ def final_answer_required_retry_prompt(prompt: str) -> str:
         "Use research tools as needed, keep Bash output focused with search excerpts or "
         "bounded page reads, and then produce the final answer. Search the local wiki first "
         "unless the request is explicitly about external or current information. If you "
-        "conclude the topic is not in the wiki, briefly state what you searched.\n\n"
+        "conclude the topic is not in the wiki, use both `compile obsidian search` and "
+        "direct wiki/raw file search, then briefly state what you searched.\n\n"
         f"Request:\n{prompt}"
     )
 

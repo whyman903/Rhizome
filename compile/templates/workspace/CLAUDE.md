@@ -79,21 +79,22 @@ compile obsidian upsert "Title" \
 
 The wiki is not text-only. Markdown paragraphs are the fallback, but richer formats should be used selectively when they materially improve comprehension or navigation.
 
-Format triggers — use the first match:
+Format triggers — use the first match, with explicit user wording taking precedence over internal labels or eval slugs:
 
 | Trigger | Format |
 |---|---|
 | Comparison of 3+ items on shared dimensions | Table (or `compile render chart` if quantitative) |
-| Relationships between 4+ concepts, causal chains, actor maps, dependencies | `compile render canvas` |
+| Explicit request to build/make/render/create a deck, chart, or canvas | Create the artifact immediately with `compile render ...` and report the created path |
+| Relationships between 4+ concepts, causal chains, actor maps, dependencies | Mermaid in-page, unless the user explicitly requested a saved canvas |
 | Sequential process, argument flow, or small hierarchy (3–15 nodes) | Mermaid diagram in-page |
-| Teaching explanation, briefing, or walkthrough | `compile render marp` |
-| Quantitative data, trends, distributions | `compile render chart` |
+| Teaching explanation, briefing, or walkthrough | Structured prose or Mermaid; use `compile render marp` only when the user asks to build a deck |
+| Quantitative data, trends, distributions | Table or inline recommendation; use `compile render chart` only when the user asks for a chart artifact |
 | Notable caveat, definition, or strong claim | Callout (`> [!note]`, `> [!warning]`, etc.) |
 | None of the above | Plain prose with wikilinks |
 
-Use callouts freely alongside any format — they are always appropriate for caveats and definitions.
+Use callouts when they add clarity. For math, use LaTeX math notation, not Unicode math symbols.
 
-Do not create rendered artifacts by default for routine notes or answers. Offer them when they would clearly help, and create them when the user asks for them or explicitly agrees.
+Do not create rendered artifacts by default for routine notes or answers. Offer them when they would clearly help, and create them when the user asks for them or explicitly agrees. "Build/make/render/create me a deck/chart/canvas" is explicit consent to render and save that artifact; after rendering, report the created path and do not ask whether to save it again.
 
 ## Ingest Workflow
 
@@ -141,16 +142,22 @@ PDF handling is best-effort.
 
 When answering questions against the wiki:
 
-1. Search the wiki first.
-2. Read wiki pages before raw files.
-3. Pull raw sources only when needed for verification or missing detail.
-4. Always answer the user's question. The wiki is the preferred evidence base, not a hard boundary on what you can answer.
-5. If the wiki partially covers the question, cite the supported claims with `[[wikilinks]]` and answer the unsupported remainder from general knowledge, briefly noting that those parts are not in the wiki.
-6. If the wiki does not cover the question at all, say that once up front and answer from general knowledge anyway.
-7. Do not refuse just because a topic is outside the wiki, and do not fall back to knowledge-cutoff disclaimers when a normal answer would suffice.
-8. Before presenting an answer, check the format triggers above and pick the best fit.
-9. Save durable answers back into the wiki when they will be useful later.
-10. When saving durable material, wire it into the existing wiki structure by updating the relevant article, map, index, or overview page rather than leaving it isolated.
+1. Classify the request before researching: brief lookup, synthesis, inventory/count, quote retrieval, audit/dedup, draft, absence check, or explicit artifact request.
+2. Search the wiki first and read wiki pages before raw files.
+3. Use the right evidence protocol:
+   - Absence claims require both `compile obsidian search` and direct `rg`/file search across `wiki/` and `raw/`; state what you searched.
+   - Inventory/count/dedup queries start with a broad aggregation pass (`rg -l`, `grep -rl`, `grep -rh "^sources:"`, `find`, `wc`) before candidate reads.
+   - Quote/verbatim queries read the source note and raw source early when available.
+   - Source-accounting queries read each named source note when it exists.
+   - Modern technical/current topics outside the wiki should use WebSearch/WebFetch when current grounding would materially improve the answer.
+4. Prefer `Read`, `Glob`, and `Grep` for file inspection; reserve Bash mainly for `compile` commands and broad aggregation shell commands. Do not use todo/planning tools for query answers.
+5. Keep searches bounded: after a broad pass plus about five targeted searches, answer with the evidence gathered and offer to dig further if useful.
+6. Always answer the user's question. The wiki is the preferred evidence base, not a hard boundary on what you can answer.
+7. If the wiki partially covers the question, cite the supported claims with `[[wikilinks]]` and answer the unsupported remainder from web-backed or general knowledge, briefly noting that those parts are not in the wiki.
+8. If the wiki does not cover the question at all, say that once up front and answer from web-backed or general knowledge anyway. Do not refuse just because a topic is outside the wiki, and do not fall back to knowledge-cutoff disclaimers when a normal answer would suffice.
+9. Match the user's register. Brief/casual requests get concise prose and no save offer.
+10. Choose persistence by destination, not ritual: offer to fold synthesis into an existing article/map, apply concrete audit fixes, delete/redirect duplicates, or iterate on drafts. Offer a new `output` page only when no better home exists and the answer is reusable.
+11. When saving durable material, wire it into the existing wiki structure by updating the relevant article, map, index, or overview page rather than leaving it isolated.
 
 ## Lint Workflow
 

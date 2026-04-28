@@ -11,6 +11,7 @@ from compile.cli import main
 from compile.evals import (
     EvalSuiteError,
     SCHEMA_VERSION,
+    analyze_workflow_flags,
     build_judge_packet,
     build_run_output_path,
     load_eval_suite,
@@ -104,8 +105,212 @@ def test_judge_packet_contains_rubric_and_requested_schema() -> None:
 
     assert "wiki first" in packet["instructions"].replace("-", " ")
     assert "citationQuality" in packet["dimensions"]
+    assert "saveTargetCorrectness" in packet["dimensions"]
+    assert "absenceSearchSufficiency" in packet["dimensions"]
+    assert "inventorySearchEfficiency" in packet["dimensions"]
+    assert "renderSaveConsentConsistency" in packet["dimensions"]
+    assert "registerFit" in packet["dimensions"]
     assert "requestedOutputSchema" in packet
     assert packet["scoreScale"]["5"].startswith("Excellent")
+
+
+def test_static_workflow_flags_catch_save_offer_absence_and_current_gaps() -> None:
+    flags = analyze_workflow_flags(
+        query="do I have anything in the wiki on my deployment provider's latest pricing?",
+        answer=(
+            "No pricing content in your wiki. Current state: here is a general knowledge summary.\n\n"
+            "Want me to save this as a wiki output page?"
+        ),
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile obsidian search "deployment provider latest pricing"'},
+            }
+        ],
+    )
+
+    codes = {flag["code"] for flag in flags}
+    assert "trivial_or_absence_save_offer" in codes
+    assert "absence_without_raw_or_wiki_grep" in codes
+    assert "freshness_claim_without_web" in codes
+
+
+def test_static_workflow_flags_do_not_treat_topics_as_freshness() -> None:
+    flags = analyze_workflow_flags(
+        query="do I have anything in the wiki on quantum computing?",
+        answer="Your wiki has no notes on quantum computing. Here's a general knowledge summary.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile obsidian search "quantum computing"'},
+            },
+            {
+                "name": "Bash",
+                "input": {"command": 'rg -ni "quantum computing|qubit" wiki raw'},
+            },
+        ],
+    )
+
+    assert "freshness_claim_without_web" not in {flag["code"] for flag in flags}
+
+
+def test_static_workflow_flags_catch_render_save_contradiction() -> None:
+    flags = analyze_workflow_flags(
+        query="build me the deck",
+        answer=(
+            "The deck is built and saved to the wiki at `wiki/outputs/Talk.md`.\n\n"
+            "Want me to save this as a wiki output page?"
+        ),
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile render marp "Talk" --body-file /tmp/deck.md'},
+            }
+        ],
+    )
+
+    codes = {flag["code"] for flag in flags}
+    assert "artifact_saved_then_save_offer" in codes
+    assert "false_or_unverified_save_claim" not in codes
+
+
+def test_static_workflow_flags_do_not_treat_output_page_status_as_save_offer() -> None:
+    flags = analyze_workflow_flags(
+        query="build me the deck",
+        answer="Created: wiki/outputs/Talk.md. The output page is ready.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile render marp "Talk" --body-file /tmp/deck.md'},
+            }
+        ],
+    )
+
+    assert flags == []
+
+
+def test_static_workflow_flags_require_direct_search_to_target_wiki_or_raw() -> None:
+    flags = analyze_workflow_flags(
+        query="summarize my notes on quantum computing",
+        answer="No notes in your wiki cover quantum computing.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile obsidian search "quantum computing"'},
+            },
+            {
+                "name": "Grep",
+                "input": {"pattern": "quantum", "path": "/tmp"},
+            },
+        ],
+    )
+
+    assert "absence_without_raw_or_wiki_grep" in {flag["code"] for flag in flags}
+
+
+def test_static_workflow_flags_refresh_does_not_verify_save_claim() -> None:
+    flags = analyze_workflow_flags(
+        query="save that answer",
+        answer="Saved to the wiki at wiki/outputs/Talk.md.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": "compile obsidian refresh"},
+            }
+        ],
+    )
+
+    assert {
+        flag["code"] for flag in flags
+    } == {"false_or_unverified_save_claim"}
+
+
+def test_static_workflow_flags_catch_inventory_search_thrash() -> None:
+    flags = analyze_workflow_flags(
+        query="how many source notes do I have that engage contractualism?",
+        answer="I found 11 source notes.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": f'compile obsidian search "contractualism {index}"'},
+            }
+            for index in range(11)
+        ],
+    )
+
+    codes = {flag["code"] for flag in flags}
+    assert "inventory_search_budget_exceeded" in codes
+    assert "inventory_without_aggregation" in codes
+
+
+def test_static_workflow_flags_inventory_query_uses_word_boundaries() -> None:
+    flags = analyze_workflow_flags(
+        query="what are the source notes about discounted account encounters?",
+        answer="Here are the relevant source notes.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": f'compile obsidian search "pricing {index}"'},
+            }
+            for index in range(11)
+        ],
+    )
+
+    codes = {flag["code"] for flag in flags}
+    assert "inventory_search_budget_exceeded" not in codes
+    assert "inventory_without_aggregation" not in codes
+
+
+def test_static_workflow_flags_ls_aggregation_requires_ls_command() -> None:
+    flags = analyze_workflow_flags(
+        query="how many source notes do I have that engage contractualism?",
+        answer="I found several source notes.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": f"compile tools inspect {index}"},
+            }
+            for index in range(6)
+        ],
+    )
+
+    assert "inventory_without_aggregation" in {flag["code"] for flag in flags}
+
+
+def test_static_workflow_flags_catch_source_accounting_without_named_reads() -> None:
+    flags = analyze_workflow_flags(
+        query="show which sources support which moves: Frankfurt, Nguyen, Anderson, and Farkas",
+        answer="Here is the source accounting.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile obsidian search "LLM bullshitters epistemic pollution"'},
+            },
+            {
+                "name": "Bash",
+                "input": {"command": 'compile obsidian page "LLM Bullshitters Paper"'},
+            },
+        ],
+    )
+
+    assert {
+        flag["code"] for flag in flags
+    } == {"source_accounting_missing_named_sources"}
+
+
+def test_static_workflow_flags_general_sources_support_query_is_not_source_accounting() -> None:
+    flags = analyze_workflow_flags(
+        query="what sources support Marx's account of alienation?",
+        answer="Here are the sources.",
+        tool_calls=[
+            {
+                "name": "Bash",
+                "input": {"command": 'compile obsidian search "Marx alienation"'},
+            }
+        ],
+    )
+
+    assert "source_accounting_missing_named_sources" not in {flag["code"] for flag in flags}
 
 
 def test_parse_claude_stream_captures_tool_call_inputs_and_results() -> None:
@@ -449,6 +654,12 @@ def test_write_run_output_emits_markdown_companion(
                 "durationMs": 12345,
                 "costUSD": 0.05,
                 "toolCalls": [{"name": "Grep"}],
+                "workflowFlags": [
+                    {
+                        "code": "trivial_or_absence_save_offer",
+                        "message": "Save offer was noisy.",
+                    }
+                ],
             }
         ],
     }
@@ -462,6 +673,8 @@ def test_write_run_output_emits_markdown_companion(
     assert "## 1. `q1`" in text
     assert "what is X?" in text
     assert "X is Y." in text
+    assert "Workflow flags" in text
+    assert "trivial_or_absence_save_offer" in text
     assert "Concurrency: 4" in text
 
 

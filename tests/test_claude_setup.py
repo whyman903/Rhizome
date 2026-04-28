@@ -48,11 +48,22 @@ def test_fresh_install(tmp_path: Path) -> None:
     assert f'cd "{ws}" && compile ...' in query
     assert "--nodes-file" in query
     assert "--script-file" in query
-    assert "Want me to save this as a wiki output page?" in query
-    assert "Only save it if the user says yes" in query
-    assert "fill any gaps from general knowledge" in query
+    assert "Brief/casual lookup or callback" in query
+    assert "Explicit artifact request" in query
+    assert "create the artifact immediately" in query
+    assert "Do not ask whether to save it again" in query
+    assert "Do not use a generic save offer" in query
+    assert "Want me to save this as a wiki output page?" not in query
+    assert "Only save it if the user says yes" not in query
+    assert "fill any gaps from web-backed or general knowledge" in query
     assert "Do not refuse just because the topic is outside the wiki" in query
     assert "Do not mention your knowledge cutoff" in query
+    assert "direct `rg`/file search across `wiki/` and `raw/`" in query
+    assert "inventory, count, list-all, and duplicate queries" in query
+    assert "quote, verbatim, or \"in their own words\"" in query
+    assert "which sources support which moves" in query
+    assert "WebSearch`/`WebFetch" in query
+    assert "LaTeX math notation, not Unicode math symbols" in query
 
     context = (home / ".claude" / "commands" / "context.md").read_text()
     assert "First try the current working directory" in context
@@ -74,7 +85,7 @@ def test_fresh_install(tmp_path: Path) -> None:
     assert "<!-- compile:figures:start -->" not in workspace_claude
     assert "create them when the user asks for them or explicitly agrees" in workspace_claude.lower()
     assert "not a hard boundary on what you can answer" in workspace_claude
-    assert "answer from general knowledge anyway" in workspace_claude
+    assert "answer from web-backed or general knowledge anyway" in workspace_claude
     assert "knowledge-cutoff disclaimers" in workspace_claude
     assert (ws / ".claude" / "settings.local.json").exists()
     settings_content = (ws / ".claude" / "settings.local.json").read_text()
@@ -355,13 +366,17 @@ def test_synthesize_command_is_installed(tmp_path: Path) -> None:
     assert "source-to-article ratio" not in content
 
 
-def test_global_query_template_hides_upsert_behind_output_save_intent(tmp_path: Path) -> None:
+def test_global_query_template_uses_conditional_persistence_targets(tmp_path: Path) -> None:
     ws = _make_workspace(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     install_claude_files(ws, home, force=False)
     query_content = (home / ".claude" / "commands" / "query.md").read_text()
-    assert "save it as an `output` page using the low-level page writer" in query_content
+    assert "Do not use a generic save offer" in query_content
+    assert "fold the answer into `[[Existing Article]]`" in query_content
+    assert "apply the targeted fixes or delete/redirect the duplicate" in query_content
+    assert "save it as a new `output` page" in query_content
+    assert "Brief/casual/absence/simple lookup → no save offer" in query_content
 
 
 def test_install_covers_all_current_template_files(tmp_path: Path) -> None:
