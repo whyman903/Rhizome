@@ -4,13 +4,13 @@ import XCTest
 final class MarkdownContentViewTests: XCTestCase {
     @MainActor
     func testPreprocessMarkdownConvertsWikiLinksToMarkdownLinks() {
-        let processed = MarkdownContentView.preprocessMarkdown("Open [[Planner|the planner]].")
+        let processed = MarkdownRenderer.preprocessMarkdown("Open [[Planner|the planner]].")
         XCTAssertEqual(processed, "Open [the planner](mywiki://page?target=Planner).")
     }
 
     @MainActor
     func testPreprocessMarkdownConvertsImageEmbedsToWorkspaceAssets() {
-        let processed = MarkdownContentView.preprocessMarkdown("See ![[wiki/outputs/chart one.png|chart]].")
+        let processed = MarkdownRenderer.preprocessMarkdown("See ![[wiki/outputs/chart one.png|chart]].")
         XCTAssertEqual(
             processed,
             "See ![chart](mywiki-asset:///workspace/wiki/outputs/chart%20one.png)."
@@ -19,7 +19,7 @@ final class MarkdownContentViewTests: XCTestCase {
 
     @MainActor
     func testPreprocessMarkdownDoesNotMangleDollarDelimitedMath() {
-        let processed = MarkdownContentView.preprocessMarkdown("Formula $x^2 + y^2$ in [[Planner]].")
+        let processed = MarkdownRenderer.preprocessMarkdown("Formula $x^2 + y^2$ in [[Planner]].")
         XCTAssertEqual(
             processed,
             "Formula $x^2 + y^2$ in [Planner](mywiki://page?target=Planner)."
@@ -28,7 +28,7 @@ final class MarkdownContentViewTests: XCTestCase {
 
     @MainActor
     func testRenderHTMLBodyPreservesBackslashMathDelimitersThroughMarkdown() {
-        let html = MarkdownContentView.renderHTMLBody(
+        let html = MarkdownRenderer.renderHTMLBody(
             #"Graph \(\mathcal{G} = (\mathcal{V}, \mathcal{E})\) has node states \[\mathbf{x}_t = \mathbf{W}_{\tau(t)} \mathbf{x}\]."#
         )
 
@@ -38,14 +38,14 @@ final class MarkdownContentViewTests: XCTestCase {
 
     @MainActor
     func testRenderHTMLBodyPreservesLatexCommandsThatCommonMarkWouldEscape() {
-        let html = MarkdownContentView.renderHTMLBody(#"Spacing \(x\!+\,y\) stays intact."#)
+        let html = MarkdownRenderer.renderHTMLBody(#"Spacing \(x\!+\,y\) stays intact."#)
 
         XCTAssertTrue(html.contains(#"\(x\!+\,y\)"#))
     }
 
     @MainActor
     func testRenderHTMLBodyUsesGitHubFlavoredTables() {
-        let html = MarkdownContentView.renderHTMLBody(
+        let html = MarkdownRenderer.renderHTMLBody(
             """
             | Name | Score |
             | --- | ---: |
@@ -62,7 +62,7 @@ final class MarkdownContentViewTests: XCTestCase {
 
     @MainActor
     func testRenderHTMLBodyDecoratesInternalLinksOnly() {
-        let html = MarkdownContentView.renderHTMLBody(
+        let html = MarkdownRenderer.renderHTMLBody(
             "Open [[Planner]], read ![[Cutting Cards - AI.pdf]], then visit https://example.com."
         )
 
@@ -75,7 +75,7 @@ final class MarkdownContentViewTests: XCTestCase {
 
     @MainActor
     func testRenderHTMLBodyTransformsMermaidCodeBlocks() {
-        let html = MarkdownContentView.renderHTMLBody(
+        let html = MarkdownRenderer.renderHTMLBody(
             """
             ```mermaid
             flowchart LR
@@ -99,5 +99,8 @@ final class MarkdownContentViewTests: XCTestCase {
         XCTAssertTrue(html.contains("/web/katex/auto-render.min.js"))
         XCTAssertTrue(html.contains("/web/mermaid/mermaid.min.js"))
         XCTAssertTrue(html.contains("/web/dompurify/purify.min.js"))
+        XCTAssertTrue(html.contains("/web/markdown.css"))
+        XCTAssertTrue(html.contains("/web/markdown.js"))
+        XCTAssertTrue(html.contains("window.MyWikiMarkdownConfig"))
     }
 }

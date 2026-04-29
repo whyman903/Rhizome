@@ -25,7 +25,7 @@ struct QueryDetailView: View {
             } detail: {
                 VStack(spacing: 0) {
                     if showSettings {
-                        SettingsView(model: model, onDismiss: { showSettings = false })
+                        SettingsView(model: model)
                     } else {
                         conversationArea
                         bottomPanel

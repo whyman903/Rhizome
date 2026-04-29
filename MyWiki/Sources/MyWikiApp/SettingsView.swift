@@ -3,7 +3,6 @@ import MyWikiCore
 
 struct SettingsView: View {
     @Bindable var model: AppModel
-    let onDismiss: () -> Void
 
     var body: some View {
         ScrollView {
@@ -24,10 +23,7 @@ struct SettingsView: View {
 
     private var themeSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("THEME")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.3)
-                .foregroundStyle(EditorialPalette.textTertiary)
+            sectionHeader("THEME")
 
             HStack(spacing: 14) {
                 ForEach(AppTheme.allCases, id: \.self) { theme in
@@ -47,10 +43,7 @@ struct SettingsView: View {
 
     private var fontSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("FONT")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.3)
-                .foregroundStyle(EditorialPalette.textTertiary)
+            sectionHeader("FONT")
 
             HStack(spacing: 14) {
                 ForEach(AppFont.allCases, id: \.self) { font in
@@ -66,14 +59,11 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Preview
+    // MARK: - Obsidian
 
     private var obsidianSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("OBSIDIAN")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.3)
-                .foregroundStyle(EditorialPalette.textTertiary)
+            sectionHeader("OBSIDIAN")
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(model.canOpenGraphDirectly
@@ -116,12 +106,11 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Claude commands
+
     private var claudeCommandsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("CLAUDE COMMANDS")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.3)
-                .foregroundStyle(EditorialPalette.textTertiary)
+            sectionHeader("CLAUDE COMMANDS")
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Slash commands live in `.claude/commands/` inside your wiki. Edit them in any editor to customize how Claude responds. After updating MyWiki, use Reset to Defaults to pick up new shipped commands (this overwrites your edits).")
@@ -180,12 +169,11 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Preview
+
     private var previewSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("PREVIEW")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.3)
-                .foregroundStyle(EditorialPalette.textTertiary)
+            sectionHeader("PREVIEW")
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("The unexamined life is not worth living.")
@@ -210,6 +198,13 @@ struct SettingsView: View {
                     .strokeBorder(EditorialPalette.border, lineWidth: 1)
             )
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .bold))
+            .kerning(1.3)
+            .foregroundStyle(EditorialPalette.textTertiary)
     }
 }
 

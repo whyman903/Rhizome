@@ -2,7 +2,7 @@ import Foundation
 import WebKit
 
 final class BundleAssetSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "mywiki-asset"
+    nonisolated static let scheme = "mywiki-asset"
 
     private let fileManager: FileManager
     private let resourceRoots: [URL]

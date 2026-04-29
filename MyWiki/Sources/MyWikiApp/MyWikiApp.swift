@@ -3,15 +3,7 @@ import MyWikiCore
 
 @main
 struct MyWikiApp: App {
-    @State private var model: AppModel
-
-    init() {
-        let model = AppModel()
-        self._model = State(initialValue: model)
-        Task { @MainActor in
-            await model.bootstrapIfNeeded()
-        }
-    }
+    @State private var model = AppModel()
 
     var body: some Scene {
         Window("MyWiki", id: "query-window") {

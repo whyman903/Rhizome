@@ -283,6 +283,44 @@ private final class DynamicCompileRunner: CompileRunning, @unchecked Sendable {
     }
 }
 
+private final class SelectivePageRunner: CompileRunning, @unchecked Sendable {
+    let workspaceInfo: WorkspaceInfo
+    let pagesByLocator: [String: WikiPage]
+    private(set) var requestedPageLocators: [String] = []
+
+    init(workspaceInfo: WorkspaceInfo, pagesByLocator: [String: WikiPage]) {
+        self.workspaceInfo = workspaceInfo
+        self.pagesByLocator = pagesByLocator
+    }
+
+    func initWorkspace(name: String, at path: URL) async throws -> WorkspaceInfo {
+        workspaceInfo
+    }
+
+    func status(at path: URL) async throws -> WorkspaceInfo {
+        workspaceInfo
+    }
+
+    func prepareWorkspaceForClaude(at path: URL, force: Bool) async throws {}
+
+    func page(locator: String, at path: URL) async throws -> WikiPage {
+        requestedPageLocators.append(locator)
+        guard let page = pagesByLocator[locator] else {
+            throw CompileCommandError(locator)
+        }
+        return page
+    }
+
+    func ingest(
+        source: String,
+        at path: URL,
+        jobID: String,
+        onEvent: @escaping @Sendable (CompileEvent) -> Void
+    ) async throws -> String? {
+        nil
+    }
+}
+
 @MainActor
 final class AppModelTests: XCTestCase {
     private var tempDirectory: URL!
@@ -408,6 +446,60 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(fakeRunner.requestedPageLocators, ["Planner"])
         XCTAssertEqual(openedNotePath, "wiki/articles/planner.md")
         XCTAssertEqual(openedWorkspacePath, workspaceURL.path)
+    }
+
+    func testOpenWikiPageFallsBackFromNotionImportTitleToCurrentTitle() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-notion-fallback", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        let info = WorkspaceInfo(
+            path: workspaceURL.path,
+            topic: "My Wiki",
+            description: "Test workspace",
+            rawFiles: 0,
+            processed: 0,
+            unprocessed: 0,
+            needsDocumentReview: 0,
+            wikiPageCount: 1
+        )
+        let runner = SelectivePageRunner(
+            workspaceInfo: info,
+            pagesByLocator: [
+                "System design": try makePage(
+                    title: "System design",
+                    relativePath: "wiki/sources/System design.md",
+                    pageType: "source"
+                )
+            ]
+        )
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let opened = expectation(description: "open fallback note")
+        var openedNotePath: String?
+
+        let model = AppModel(
+            runner: runner,
+            dispatcher: NoopDispatcher(),
+            queryRunner: NoopQueryRunner(),
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-notion-fallback", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { notePath, _ in
+                openedNotePath = notePath
+                opened.fulfill()
+                return .opened
+            },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.openWikiPage(target: "System design (Notion)")
+
+        await fulfillment(of: [opened], timeout: 1.0)
+        XCTAssertEqual(runner.requestedPageLocators, ["System design (Notion)", "System design"])
+        XCTAssertEqual(openedNotePath, "wiki/sources/System design.md")
+        XCTAssertNil(model.lastError)
     }
 
     func testSendQueryAddsInAppQueryToFeedStore() async throws {

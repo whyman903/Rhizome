@@ -744,6 +744,7 @@ public final class AppModel {
         let workspaceURL = workspace.url
         let runner = self.runner
         let logger = self.logger
+        let fallbackLocators = Self.fallbackWikiPageLocators(for: trimmed)
         Task { [weak self] in
             do {
                 let page = try await runner.page(locator: trimmed, at: workspaceURL)
@@ -754,6 +755,21 @@ public final class AppModel {
                     logger.log("openWikiPage: resolved target=\"\(trimmed)\" -> \(page.relativePath) result=\(String(describing: result))")
                 }
             } catch {
+                for fallbackLocator in fallbackLocators {
+                    do {
+                        let page = try await runner.page(locator: fallbackLocator, at: workspaceURL)
+                        await MainActor.run {
+                            guard let self else { return }
+                            let result = self.openNoteHandler(page.relativePath, workspaceURL)
+                            self.lastError = self.noteOpenErrorMessage(for: result, relativePath: page.relativePath)
+                            logger.log("openWikiPage: resolved target=\"\(trimmed)\" via fallback=\"\(fallbackLocator)\" -> \(page.relativePath) result=\(String(describing: result))")
+                        }
+                        return
+                    } catch {
+                        logger.log("openWikiPage: fallback failed target=\"\(trimmed)\" fallback=\"\(fallbackLocator)\" error=\(error.localizedDescription)")
+                    }
+                }
+
                 await MainActor.run {
                     self?.lastError = "Could not resolve wiki page '\(trimmed)': \(error.localizedDescription)"
                     logger.log("openWikiPage: failed target=\"\(trimmed)\" error=\(error.localizedDescription)")
@@ -1067,6 +1083,20 @@ public final class AppModel {
     private func graphPluginPromptSuppressedKey(for workspaceURL: URL) -> String {
         graphPluginPromptSuppressedKeyPrefix
             + workspaceURL.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    private static func fallbackWikiPageLocators(for target: String) -> [String] {
+        let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = trimmed.lowercased()
+        let suffixes = [" (Notion)"]
+        return suffixes.compactMap { suffix in
+            guard lowercased.hasSuffix(suffix.lowercased()) else {
+                return nil
+            }
+            let fallback = String(trimmed.dropLast(suffix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return fallback.isEmpty ? nil : fallback
+        }
     }
 
     private func noteOpenErrorMessage(
