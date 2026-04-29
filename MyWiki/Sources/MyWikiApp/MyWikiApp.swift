@@ -17,8 +17,7 @@ struct MyWikiApp: App {
             LauncherView(model: model)
                 .task { await model.bootstrapIfNeeded() }
         } label: {
-            Image(systemName: "book.closed")
-                .symbolRenderingMode(.hierarchical)
+            Image(nsImage: MenuBarIcon.template)
         }
         .menuBarExtraStyle(.window)
     }
