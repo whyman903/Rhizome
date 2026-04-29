@@ -2,16 +2,18 @@
     const config = window.MyWikiMarkdownConfig || {};
 
     function postHeight() {
-        const body = document.body;
-        const html = document.documentElement;
+        const content = document.getElementById("content");
+        if (!content) return;
+
+        const bounds = content.getBoundingClientRect();
+        // Measure rendered markdown, not the WKWebView viewport. The viewport can
+        // stay taller than the content in SwiftUI and create persistent blank space.
         const height = Math.max(
-            body.scrollHeight,
-            body.offsetHeight,
-            html.clientHeight,
-            html.scrollHeight,
-            html.offsetHeight
+            content.scrollHeight,
+            content.offsetHeight,
+            bounds.height
         );
-        window.webkit.messageHandlers.contentHeight.postMessage(height);
+        window.webkit.messageHandlers.contentHeight.postMessage(Math.max(1, Math.ceil(height)));
     }
 
     function renderMath() {
@@ -118,6 +120,7 @@
     window.addEventListener("resize", postHeight);
 
     if (window.ResizeObserver) {
-        new ResizeObserver(postHeight).observe(document.body);
+        const content = document.getElementById("content");
+        if (content) new ResizeObserver(postHeight).observe(content);
     }
 })();

@@ -20,11 +20,24 @@ body {
     box-sizing: border-box;
 }
 
+#content {
+    display: flow-root;
+    min-height: 1px;
+}
+
 body > *:first-child {
     margin-top: 0;
 }
 
 body > *:last-child {
+    margin-bottom: 0;
+}
+
+#content > *:first-child {
+    margin-top: 0;
+}
+
+#content > *:last-child {
     margin-bottom: 0;
 }
 
