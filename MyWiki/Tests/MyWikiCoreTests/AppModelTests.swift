@@ -1325,17 +1325,21 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(savedRecords.first?.turns.count, 2)
     }
 
-    func testSidebarHistoryExcludesActiveSessionRecord() async throws {
+    func testSidebarHistoryKeepsSelectedHistoryRecordInPlace() async throws {
         let workspaceURL = tempDirectory.appending(path: "wiki", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
 
-        let activeRecord = QueryHistoryRecord(id: UUID(), turns: [
-            QueryTurn(question: "Active question", answer: "Active answer")
-        ])
-        let archivedRecord = QueryHistoryRecord(id: UUID(), turns: [
-            QueryTurn(question: "Archived question", answer: "Archived answer")
-        ])
+        let activeRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Active question", answer: "Active answer")],
+            archivedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let archivedRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Archived question", answer: "Archived answer")],
+            archivedAt: Date(timeIntervalSince1970: 1_000)
+        )
         try writeHistory([activeRecord, archivedRecord], to: workspaceURL)
 
         let model = AppModel(
@@ -1354,7 +1358,87 @@ final class AppModelTests: XCTestCase {
         model.selectHistorySession(activeRecord)
 
         XCTAssertEqual(model.queryHistory.count, 2)
-        XCTAssertEqual(model.sidebarQueryHistory.map(\.id), [archivedRecord.id])
+        XCTAssertEqual(model.sidebarQueryHistory.map(\.id), [activeRecord.id, archivedRecord.id])
+        XCTAssertFalse(model.hasUnsavedActiveQuerySession)
+    }
+
+    func testSelectingHistorySessionDoesNotMovePreviousSelectionToTop() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-selection-order", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let olderRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Older question", answer: "Older answer")],
+            archivedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let newerRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Newer question", answer: "Newer answer")],
+            archivedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        try writeHistory([newerRecord, olderRecord], to: workspaceURL)
+
+        let model = AppModel(
+            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
+            dispatcher: NoopDispatcher(),
+            queryRunner: NoopQueryRunner(),
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-selection-order", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        XCTAssertEqual(model.queryHistory.map(\.id), [newerRecord.id, olderRecord.id])
+
+        model.selectHistorySession(olderRecord)
+        model.selectHistorySession(newerRecord)
+
+        XCTAssertEqual(model.queryHistory.map(\.id), [newerRecord.id, olderRecord.id])
+    }
+
+    func testFollowUpFromSelectedHistorySessionMovesRecordToTop() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-followup-order", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let olderRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Older question", answer: "Older answer")],
+            archivedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let newerRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Newer question", answer: "Newer answer")],
+            archivedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        try writeHistory([newerRecord, olderRecord], to: workspaceURL)
+
+        let model = AppModel(
+            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
+            dispatcher: NoopDispatcher(),
+            queryRunner: SuccessfulQueryRunner(),
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-followup-order", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.selectHistorySession(olderRecord)
+        model.sendFollowUp("What changed?")
+
+        await waitUntil {
+            model.queryHistory.first?.id == olderRecord.id
+                && model.queryHistory.first?.turns.count == 2
+        }
+
+        XCTAssertEqual(model.queryHistory.map(\.id), [olderRecord.id, newerRecord.id])
     }
 
     func testDismissingSelectedHistorySessionRestoresArchivedRecordToSidebar() async throws {
@@ -1381,7 +1465,8 @@ final class AppModelTests: XCTestCase {
 
         await model.bootstrapIfNeeded()
         model.selectHistorySession(record)
-        XCTAssertEqual(model.sidebarQueryHistory.count, 0)
+        XCTAssertEqual(model.sidebarQueryHistory.map(\.id), [record.id])
+        XCTAssertFalse(model.hasUnsavedActiveQuerySession)
 
         model.dismissQueryResponse()
 
@@ -1427,6 +1512,7 @@ final class AppModelTests: XCTestCase {
         }
 
         XCTAssertTrue(model.hasActiveQuerySession)
+        XCTAssertTrue(model.hasUnsavedActiveQuerySession)
         XCTAssertTrue(model.querySession.turns.isEmpty)
 
         model.cancelQuery()

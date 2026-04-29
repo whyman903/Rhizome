@@ -327,22 +327,25 @@ struct QueryDetailView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        // Active session
-                        if model.hasActiveQuerySession {
+                        // Unsaved or in-flight sessions do not have a history row yet.
+                        if model.hasUnsavedActiveQuerySession {
                             sidebarRow(
                                 label: model.querySession.firstQuestion,
                                 isActive: true,
-                                action: {}
+                                action: {
+                                    showSettings = false
+                                }
                             )
                         }
                         // Archived history
                         ForEach(model.sidebarQueryHistory) { record in
                             sidebarRow(
                                 label: record.firstQuestion,
-                                isActive: false,
+                                isActive: record.id == model.querySession.id,
                                 action: {
                                     model.selectHistorySession(record)
                                     followUpText = ""
+                                    showSettings = false
                                 }
                             )
                         }

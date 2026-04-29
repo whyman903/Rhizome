@@ -48,8 +48,11 @@ public final class AppModel {
     public var hasActiveQuerySession: Bool {
         querySession.status != .idle || !querySession.turns.isEmpty
     }
+    public var hasUnsavedActiveQuerySession: Bool {
+        hasActiveQuerySession && !queryHistory.contains { $0.id == querySession.id }
+    }
     public var sidebarQueryHistory: [QueryHistoryRecord] {
-        queryHistory.filter { $0.id != querySession.id }
+        queryHistory
     }
     public var lastError: String?
     public var statusMessage = "Preparing workspace..."
@@ -443,21 +446,28 @@ public final class AppModel {
 
     /// Persist the current session into history immediately (called after each completed query).
     private func saveCurrentSession() {
-        guard !querySession.turns.isEmpty else { return }
-        upsertHistoryRecord(QueryHistoryRecord(
-            id: querySession.id,
-            turns: querySession.turns,
-            claudeSessionID: querySession.claudeSessionID
-        ))
+        persistCurrentSession(moveToTop: true)
     }
 
     private func archiveSessionIfNeeded() {
+        persistCurrentSession(moveToTop: false)
+    }
+
+    private func persistCurrentSession(moveToTop: Bool) {
         guard !querySession.turns.isEmpty else { return }
-        upsertHistoryRecord(QueryHistoryRecord(
+        let existingRecord = queryHistory.first { $0.id == querySession.id }
+        let archivedAt = moveToTop
+            ? Date()
+            : existingRecord?.archivedAt ?? Date()
+        let record = QueryHistoryRecord(
             id: querySession.id,
             turns: querySession.turns,
-            claudeSessionID: querySession.claudeSessionID
-        ))
+            claudeSessionID: querySession.claudeSessionID,
+            archivedAt: archivedAt
+        )
+
+        guard existingRecord != record else { return }
+        upsertHistoryRecord(record)
     }
 
     private var historyFileURL: URL? {
