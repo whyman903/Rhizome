@@ -121,6 +121,10 @@ private struct MarkdownWebView: NSViewRepresentable {
         cssColor(NSColor(EditorialPalette.textPrimary))
     }
 
+    private static var backgroundColor: String {
+        cssColor(NSColor(EditorialPalette.background))
+    }
+
     private static var secondaryColor: String {
         cssColor(NSColor(EditorialPalette.textSecondary))
     }
@@ -140,6 +144,7 @@ private struct MarkdownWebView: NSViewRepresentable {
         return """
         :root {
             --mywiki-font-family: \(fontFamily);
+            --mywiki-background: \(backgroundColor);
             --mywiki-text: \(textColor);
             --mywiki-secondary: \(secondaryColor);
             --mywiki-surface: \(surfaceColor);
@@ -155,6 +160,7 @@ private struct MarkdownWebView: NSViewRepresentable {
     private static var configurationScript: String {
         let payload: [String: Any] = [
             "fontFamily": fontFamily,
+            "mermaidContrastTextColor": backgroundColor,
             "mermaidThemeVariables": [
                 "fontFamily": fontFamily,
                 "primaryColor": surfaceColor,

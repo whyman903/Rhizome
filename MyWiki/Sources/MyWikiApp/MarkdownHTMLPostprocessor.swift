@@ -19,7 +19,7 @@ enum MarkdownHTMLPostprocessor {
                 continue
             }
 
-            converted.replaceSubrange(fullRange, with: "<pre class=\"mermaid\">\(converted[bodyRange])</pre>")
+            converted.replaceSubrange(fullRange, with: "<pre class=\"mywiki-mermaid\">\(converted[bodyRange])</pre>")
         }
 
         return converted

@@ -64,8 +64,93 @@
         });
     }
 
+    function parseColor(value) {
+        if (!value || value === "none" || value === "transparent" || value.startsWith("url(")) return null;
+
+        const match = String(value).trim().match(/^rgba?\(([^)]+)\)$/i);
+        if (!match) return null;
+
+        const parts = match[1].split(",").map((part) => Number(part.trim()));
+        if (parts.length < 3 || parts.slice(0, 3).some((part) => Number.isNaN(part))) return null;
+
+        return {
+            r: Math.max(0, Math.min(255, parts[0])),
+            g: Math.max(0, Math.min(255, parts[1])),
+            b: Math.max(0, Math.min(255, parts[2])),
+            a: parts.length > 3 && !Number.isNaN(parts[3]) ? parts[3] : 1
+        };
+    }
+
+    function luminance(color) {
+        const channel = (value) => {
+            const normalized = value / 255;
+            return normalized <= 0.03928
+                ? normalized / 12.92
+                : Math.pow((normalized + 0.055) / 1.055, 2.4);
+        };
+
+        return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
+    }
+
+    function contrastRatio(first, second) {
+        const lighter = Math.max(luminance(first), luminance(second));
+        const darker = Math.min(luminance(first), luminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    function setMermaidLabelColor(node, color) {
+        node.querySelectorAll(".nodeLabel, .nodeLabel *, .label, .label *, text, tspan").forEach((label) => {
+            label.style.color = color;
+            label.style.fill = color;
+        });
+    }
+
+    function adjustMermaidLabelContrast(root) {
+        const themeVariables = config.mermaidThemeVariables || {};
+        const candidateColors = [
+            themeVariables.primaryTextColor,
+            config.mermaidContrastTextColor,
+            getComputedStyle(document.body).color
+        ]
+            .filter(Boolean)
+            .filter((value, index, values) => values.indexOf(value) === index);
+
+        const candidates = candidateColors
+            .map((value) => ({ value, color: parseColor(value) }))
+            .filter((candidate) => candidate.color);
+
+        if (!candidates.length) return;
+
+        root.querySelectorAll("g.node").forEach((node) => {
+            const shape = node.querySelector("rect,circle,ellipse,polygon,path");
+            if (!shape) return;
+
+            const fillColor = parseColor(getComputedStyle(shape).fill);
+            if (!fillColor || fillColor.a < 0.1) return;
+
+            const label = node.querySelector(".nodeLabel, .label, text, tspan");
+            if (!label) return;
+
+            const labelStyle = getComputedStyle(label);
+            const currentColor = parseColor(labelStyle.color) || parseColor(labelStyle.fill);
+            const currentContrast = currentColor ? contrastRatio(fillColor, currentColor) : 0;
+            if (currentContrast >= 4.5) return;
+
+            const best = candidates.reduce((selected, candidate) => {
+                const contrast = contrastRatio(fillColor, candidate.color);
+                return !selected || contrast > selected.contrast
+                    ? { ...candidate, contrast }
+                    : selected;
+            }, null);
+
+            if (best && best.contrast > currentContrast) {
+                setMermaidLabelColor(node, best.value);
+            }
+        });
+    }
+
     async function renderMermaid() {
-        const blocks = Array.from(document.querySelectorAll("pre.mermaid"));
+        const blocks = Array.from(document.querySelectorAll("pre.mywiki-mermaid"));
         if (!blocks.length || !window.mermaid) return;
 
         mermaid.initialize({
@@ -87,7 +172,11 @@
             try {
                 const result = await mermaid.render(`mywiki-mermaid-${index}`, block.textContent || "");
                 replacement.innerHTML = window.DOMPurify
-                    ? DOMPurify.sanitize(result.svg, { ADD_TAGS: ["style"], ADD_ATTR: ["dominant-baseline"] })
+                    ? DOMPurify.sanitize(result.svg, {
+                        ADD_TAGS: ["foreignObject", "foreignobject", "style"],
+                        ADD_ATTR: ["dominant-baseline"],
+                        HTML_INTEGRATION_POINTS: { foreignobject: true }
+                    })
                     : result.svg;
                 if (result.bindFunctions) result.bindFunctions(replacement);
             } catch (error) {
@@ -104,6 +193,7 @@
             }
 
             block.replaceWith(replacement);
+            adjustMermaidLabelContrast(replacement);
             postHeight();
         }
     }

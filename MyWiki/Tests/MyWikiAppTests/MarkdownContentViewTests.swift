@@ -84,9 +84,10 @@ final class MarkdownContentViewTests: XCTestCase {
             """
         )
 
-        XCTAssertTrue(html.contains("<pre class=\"mermaid\">"))
+        XCTAssertTrue(html.contains("<pre class=\"mywiki-mermaid\">"))
         XCTAssertTrue(html.contains("flowchart LR"))
         XCTAssertTrue(html.contains("A --&gt; B"))
+        XCTAssertFalse(html.contains("<pre class=\"mermaid\">"))
         XCTAssertFalse(html.contains("language-mermaid"))
     }
 
@@ -102,5 +103,6 @@ final class MarkdownContentViewTests: XCTestCase {
         XCTAssertTrue(html.contains("/web/markdown.css"))
         XCTAssertTrue(html.contains("/web/markdown.js"))
         XCTAssertTrue(html.contains("window.MyWikiMarkdownConfig"))
+        XCTAssertTrue(html.contains("mermaidContrastTextColor"))
     }
 }
