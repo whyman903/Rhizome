@@ -1,9 +1,9 @@
-# Compile Developer Contract
+# Rhizome Developer Contract
 
 This repository builds two things:
 
 1. **`compile`** — a Python CLI for maintaining an Obsidian-backed wiki with LLM assistance.
-2. **`MyWiki.app`** — a macOS menu-bar companion that wraps the CLI as a PyInstaller sidecar.
+2. **`Rhizome.app`** — a macOS menu-bar companion that wraps the CLI as a PyInstaller sidecar.
 
 Both share the same templates under `compile/templates/` and the same workspace contract.
 
@@ -26,8 +26,8 @@ uv run compile claude setup /tmp/test-wiki
 uv run compile ingest example.md -p /tmp/test-wiki
 
 # macOS app
-./scripts/build-mywiki-app.sh            # produces dist/MyWiki.app
-swift test --package-path MyWiki         # Swift test suite
+./scripts/build-rhizome-app.sh            # produces dist/Rhizome.app
+swift test --package-path Rhizome         # Swift test suite
 ```
 
 ## Module Map
@@ -49,12 +49,12 @@ swift test --package-path MyWiki         # Swift test suite
 
 ### macOS app
 
-- `MyWiki/Package.swift` — SwiftPM package definition (macOS 14+, arm64).
-- `MyWiki/Sources/MyWikiApp/` — SwiftUI app (menu-bar extra + query window).
-- `MyWiki/Sources/MyWikiCore/` — headless logic: `CompileRunner` (sidecar RPC), `ClaudeQueryRunner` (streaming `claude -p`), `AppModel`, `FeedStore`, `Obsidian` (URL scheme opener).
-- `MyWiki/support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
-- `MyWiki/support/Info.plist` / `AppIcon.icns` — bundle metadata.
-- `scripts/build-mywiki-app.sh` — builds sidecar + Swift product, assembles and ad-hoc signs `dist/MyWiki.app`.
+- `Rhizome/Package.swift` — SwiftPM package definition (macOS 14+, arm64).
+- `Rhizome/Sources/RhizomeApp/` — SwiftUI app (menu-bar extra + query window).
+- `Rhizome/Sources/RhizomeCore/` — headless logic: `CompileRunner` (sidecar RPC), `ClaudeQueryRunner` (streaming `claude -p`), `AppModel`, `FeedStore`, `Obsidian` (URL scheme opener).
+- `Rhizome/support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
+- `Rhizome/support/Info.plist` / `AppIcon.icns` — bundle metadata.
+- `scripts/build-rhizome-app.sh` — builds sidecar + Swift product, assembles and ad-hoc signs `dist/Rhizome.app`.
 
 ## Development Rules
 
@@ -63,14 +63,14 @@ swift test --package-path MyWiki         # Swift test suite
 - Preserve backward compatibility only where it protects existing workspaces with low complexity.
 - When you add a CLI command that needs Claude Code integration, add a template under `compile/templates/workspace/commands/` (or `global/` for cross-wiki commands) — the `compile claude setup` flow installs every file in those directories automatically.
 - When you change a template, bump the matching behavior tests under `tests/test_claude_setup.py` and verify `compile claude setup --force` refreshes existing workspaces cleanly.
-- The Swift layer assumes the sidecar emits stable JSON envelopes (`--json-output` / `--json-stream`). Before changing a command's JSON shape, grep `MyWiki/Sources/MyWikiCore/` for the matching decoder.
+- The Swift layer assumes the sidecar emits stable JSON envelopes (`--json-output` / `--json-stream`). Before changing a command's JSON shape, grep `Rhizome/Sources/RhizomeCore/` for the matching decoder.
 
 ## Release Standard
 
 Before finishing a change:
 
 1. Run `uv run pytest`.
-2. Run `swift test --package-path MyWiki` if the change touches Swift code or CLI JSON envelopes.
+2. Run `swift test --package-path Rhizome` if the change touches Swift code or CLI JSON envelopes.
 3. Smoke-test the start workflow in a scratch dir:
    ```bash
    uv run compile init "Smoke" -p /tmp/smoke
@@ -79,5 +79,5 @@ Before finishing a change:
    uv run compile health -p /tmp/smoke
    ```
 4. If templates changed, confirm `compile claude setup <existing-wiki> --force` produces the expected diff (no stray files, obsolete templates removed, settings merged).
-5. If the Mac app changed, rebuild with `./scripts/build-mywiki-app.sh` and verify the bundle launches (`open dist/MyWiki.app`).
+5. If the Mac app changed, rebuild with `./scripts/build-rhizome-app.sh` and verify the bundle launches (`open dist/Rhizome.app`).
 6. Confirm `README.md`, this file, and `compile/templates/workspace/CLAUDE.md` still reflect actual behavior.

@@ -94,7 +94,7 @@ def test_fresh_install(tmp_path: Path) -> None:
     assert '"Bash(compile health)"' in settings_content
     assert '"Bash(compile status*)"' not in settings_content
     assert '"Bash(compile health*)"' not in settings_content
-    assert ".compile/mywiki-bin/compile status --path . --json-output" in settings_content
+    assert ".compile/rhizome-bin/compile status --path . --json-output" in settings_content
     for name in workspace_templates:
         assert (ws / ".claude" / "commands" / name).exists()
 
@@ -208,7 +208,7 @@ def test_force_merges_existing_settings_local_json(tmp_path: Path) -> None:
     assert '"Bash(custom command)"' in merged
     assert '"mcp__notion"' in merged
     assert '"matcher": "custom"' in merged
-    assert ".compile/mywiki-bin/compile status --path . --json-output" in merged
+    assert ".compile/rhizome-bin/compile status --path . --json-output" in merged
 
 
 def test_mispointed_globals_detected(tmp_path: Path) -> None:
@@ -254,7 +254,7 @@ def test_mispointed_globals_fixed_with_force(tmp_path: Path) -> None:
 
 
 def test_path_with_spaces_quoted_in_shell_commands(tmp_path: Path) -> None:
-    ws = _make_workspace(tmp_path, "My Wiki")
+    ws = _make_workspace(tmp_path, "Rhizome")
     home = tmp_path / "home"
     home.mkdir()
 

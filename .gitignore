@@ -46,7 +46,7 @@ xcuserdata/
 *.xcworkspace/xcuserdata/
 
 # Keep SwiftPM dependency resolution pinned for the app target.
-!MyWiki/Package.resolved
+!Rhizome/Package.resolved
 
 # Local evaluation scratch space
 evals/

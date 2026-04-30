@@ -40,7 +40,7 @@ def _write_pdf(path: Path, *, text: str = "") -> None:
 class TestInitCommand:
     def test_basic_init(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "My Wiki", "-p", str(tmp_path / "new")])
+        result = runner.invoke(main, ["init", "Rhizome", "-p", str(tmp_path / "new")])
         assert result.exit_code == 0
         assert "initialized" in result.output.lower()
         assert (tmp_path / "new" / "wiki").is_dir()
@@ -48,7 +48,7 @@ class TestInitCommand:
     def test_init_with_description(self, tmp_path: Path) -> None:
         runner = CliRunner()
         result = runner.invoke(main, [
-            "init", "My Wiki", "-d", "A personal knowledge base", "-p", str(tmp_path / "new"),
+            "init", "Rhizome", "-d", "A personal knowledge base", "-p", str(tmp_path / "new"),
         ])
         assert result.exit_code == 0
 
@@ -83,19 +83,19 @@ class TestStatusCommand:
 class TestMachineReadableCommands:
     def test_init_json_success(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "My Wiki", "--path", str(tmp_path), "--json-output"])
+        result = runner.invoke(main, ["init", "Rhizome", "--path", str(tmp_path), "--json-output"])
 
         assert result.exit_code == 0
         payload = json.loads(result.output)
         assert payload["ok"] is True
-        assert payload["workspace"]["topic"] == "My Wiki"
+        assert payload["workspace"]["topic"] == "Rhizome"
         assert payload["workspace"]["path"] == str(tmp_path)
 
     def test_init_json_failure(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Existing")
         runner = CliRunner()
 
-        result = runner.invoke(main, ["init", "My Wiki", "--path", str(tmp_path), "--json-output"])
+        result = runner.invoke(main, ["init", "Rhizome", "--path", str(tmp_path), "--json-output"])
 
         assert result.exit_code != 0
         payload = json.loads(result.output)

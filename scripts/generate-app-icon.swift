@@ -149,8 +149,8 @@ func writePNG(_ image: CGImage, to url: URL) throws {
 
 let scriptPath = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
 let repoRoot = scriptPath.deletingLastPathComponent().deletingLastPathComponent()
-let supportIcns = repoRoot.appendingPathComponent("MyWiki/support/AppIcon.icns")
-let resourceIcns = repoRoot.appendingPathComponent("MyWiki/Sources/MyWikiApp/Resources/AppIcon.icns")
+let supportIcns = repoRoot.appendingPathComponent("Rhizome/support/AppIcon.icns")
+let resourceIcns = repoRoot.appendingPathComponent("Rhizome/Sources/RhizomeApp/Resources/AppIcon.icns")
 let workDir = repoRoot.appendingPathComponent("dist/icon-build")
 let iconset = workDir.appendingPathComponent("AppIcon.iconset")
 

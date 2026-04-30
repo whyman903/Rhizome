@@ -1,10 +1,10 @@
-# Compile
+# Rhizome
 
-**Compile** is an LLM-maintained personal wiki for Obsidian. You feed it raw sources — PDFs, Notion pages, URLs, stray notes — and Claude does the reading, summarizing, cross-linking, and maintenance. Over time the wiki compounds: every ingested source and every saved answer makes it richer and better connected.
+**Rhizome** is an LLM-maintained personal wiki for Obsidian. You feed it raw sources — PDFs, Notion pages, URLs, stray notes — and Claude does the reading, summarizing, cross-linking, and maintenance. Over time the wiki compounds: every ingested source and every saved answer makes it richer and better connected.
 
-## MyWiki.app — the front door
+## Rhizome.app — the front door
 
-The primary way to use Compile is **MyWiki.app**, a native macOS menu-bar companion. It gives you:
+The primary way to use Rhizome is **Rhizome.app**, a native macOS menu-bar companion. It gives you:
 
 - **A query window.** Ask a question in plain English; Claude searches your wiki first, cites your own notes with `[[wikilinks]]`, and fills gaps from general knowledge when needed. Answers stream back as markdown tables, mermaid diagrams, and Obsidian callouts — not just paragraphs.
 - **Follow-ups with session memory.** Each query thread is a resumable Claude session.
@@ -12,7 +12,7 @@ The primary way to use Compile is **MyWiki.app**, a native macOS menu-bar compan
 - **A bundled CLI sidecar** (`compile-bin`, built with PyInstaller) that handles ingest, synthesis, rendering, and health checks — no separate Python install needed.
 - **Auto-installed slash commands** (`/capture`, `/query`, `/context`, `/ingest`, `/lint`, `/synthesize`, `/notion-sync`, …) that Claude Code can invoke from any terminal session against your wiki.
 
-Under the hood, MyWiki runs `claude -p` as an agentic research session against your workspace. In-app queries allow Bash, local search/read tools, Task subagents, and web search; direct edit/write tools are blocked. Query mode is answer-first: it searches the wiki by default, and it may save or render through `compile` only when you explicitly ask for an artifact or confirm a follow-up save/integration action.
+Under the hood, Rhizome runs `claude -p` as an agentic research session against your workspace. In-app queries allow Bash, local search/read tools, Task subagents, and web search; direct edit/write tools are blocked. Query mode is answer-first: it searches the wiki by default, and it may save or render through `compile` only when you explicitly ask for an artifact or confirm a follow-up save/integration action.
 
 ## The Python CLI
 
@@ -44,20 +44,20 @@ Claude Code must be authenticated (run `claude` once in any terminal) before the
 
 ```bash
 git clone <this-repo>
-cd walker-wiki
-./scripts/build-mywiki-app.sh
-cp -R dist/MyWiki.app /Applications/
-open /Applications/MyWiki.app
+cd rhizome
+./scripts/build-rhizome-app.sh
+cp -R dist/Rhizome.app /Applications/
+open /Applications/Rhizome.app
 ```
 
 The build is arm64-only and ad-hoc signed. If Gatekeeper blocks the first launch:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/MyWiki.app
-open /Applications/MyWiki.app
+xattr -dr com.apple.quarantine /Applications/Rhizome.app
+open /Applications/Rhizome.app
 ```
 
-On first launch, MyWiki creates a default workspace at `~/wiki` called "Commonplace" and installs the Claude Code commands that target it. Rebuild and replace the app to pick up new changes.
+On first launch, Rhizome creates a default workspace at `~/wiki` called "Rhizome" and installs the Claude Code commands that target it. Rebuild and replace the app to pick up new changes.
 
 ---
 
@@ -75,7 +75,7 @@ When you ingest a source, the source note embeds the full extracted text in a co
 
 ### Slash commands
 
-Use these from MyWiki.app or from a Claude Code session launched by the app:
+Use these from Rhizome.app or from a Claude Code session launched by the app:
 
 | Command | What it does |
 |---|---|
@@ -87,17 +87,17 @@ Use these from MyWiki.app or from a Claude Code session launched by the app:
 | `/synthesize [theme]` | Connect accumulated sources into articles or maps. |
 | `/notion-setup`, `/notion-sync` | Save a Notion scope, then pull matching pages into `raw/notion/`. |
 
-You can hand-edit any of these at `<workspace>/.claude/commands/*.md` or `~/.claude/commands/*.md` — open them from MyWiki's Settings → Claude Commands. Your edits survive app restarts.
+You can hand-edit any of these at `<workspace>/.claude/commands/*.md` or `~/.claude/commands/*.md` — open them from Rhizome's Settings → Claude Commands. Your edits survive app restarts.
 
 ---
 
 ## Troubleshooting
 
-- **MyWiki.app won't open** — `xattr -dr com.apple.quarantine /Applications/MyWiki.app`.
-- **"Unable to locate bundled compile-bin"** — rebuild with `./scripts/build-mywiki-app.sh`.
+- **Rhizome.app won't open** — `xattr -dr com.apple.quarantine /Applications/Rhizome.app`.
+- **"Unable to locate bundled compile-bin"** — rebuild with `./scripts/build-rhizome-app.sh`.
 - **"Obsidian is not installed"** — install from [obsidian.md](https://obsidian.md) and reopen.
 - **Graph button is disabled** — install the Advanced URI plugin when prompted, then relaunch Obsidian.
-- **`compile: command not found` from a slash command** — you ran Claude Code from a terminal MyWiki didn't launch. Start it from the app, or install the CLI standalone: `uv tool install /path/to/this/repo`.
+- **`compile: command not found` from a slash command** — you ran Claude Code from a terminal Rhizome didn't launch. Start it from the app, or install the CLI standalone: `uv tool install /path/to/this/repo`.
 
 ---
 
@@ -107,9 +107,9 @@ You can hand-edit any of these at `<workspace>/.claude/commands/*.md` or `~/.cla
 uv sync
 uv run pytest
 uv run compile --help
-swift test --package-path MyWiki
+swift test --package-path Rhizome
 ```
 
-Set `MYWIKI_DEV_WORKSPACE=~/wiki` before running the build script to auto-sync template changes into your wiki on each build.
+Set `RHIZOME_DEV_WORKSPACE=~/wiki` before running the build script to auto-sync template changes into your wiki on each build.
 
 See [`CLAUDE.md`](CLAUDE.md) for the developer contract (product boundary, module map, release standard).

@@ -364,7 +364,7 @@ def _ingest_raw_source(
 
 @click.group()
 def main() -> None:
-    """Compile — an LLM-maintained wiki workspace."""
+    """Rhizome — an LLM-maintained wiki workspace."""
 
 
 @main.command()

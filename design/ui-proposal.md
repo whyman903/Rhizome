@@ -1,4 +1,4 @@
-# MyWiki — visual redesign proposals
+# Rhizome — visual redesign proposals
 
 > Mockups below are inline SVG. They render in GitHub and in VS Code's markdown preview.
 > They are layout/typography sketches, not pixel-perfect comps — treat them as wireframes
@@ -57,7 +57,7 @@ Below are three directions that each pick one aesthetic and commit.
   <!-- sparkles icon -->
   <text x="22" y="58" font-family="-apple-system" font-size="30" fill="#6EE7FF">✦</text>
   <text x="58" y="50" font-family="-apple-system" font-size="19" font-weight="600" fill="#FFFFFF">walker/wiki</text>
-  <text x="58" y="66" font-family="SF Mono, monospace" font-size="11" fill="#FFFFFF" opacity="0.45">~/Downloads/walker-wiki</text>
+  <text x="58" y="66" font-family="SF Mono, monospace" font-size="11" fill="#FFFFFF" opacity="0.45">~/Downloads/rhizome</text>
   <text x="422" y="54" font-family="-apple-system" font-size="15" fill="#FFFFFF" opacity="0.55">⋯</text>
   <line x1="0" y1="88" x2="460" y2="88" stroke="#FFFFFF" opacity="0.06"/>
 
@@ -484,7 +484,7 @@ Independent of which palette you pick, these would land well:
 4. **Remove all glow shadows** from buttons and icons. Drop shadows cost depth credibility, not earn it.
 5. **Replace the `cyan→purple` primary button gradient** with a single flat accent color. A gradient on a 5-character button adds nothing.
 6. **Tighten the vertical rhythm.** Current spacing is `18/14/16/14/18` on a 460pt window, which adds up fast. Drop to a consistent 12pt unit so there's more content density.
-7. **Consider a brand mark.** "MyWiki" and ✦ are placeholder-grade. Spend 10 minutes on a 2-character monogram or wordmark and you've instantly added identity.
+7. **Consider a brand mark.** "Rhizome" and ✦ are placeholder-grade. Spend 10 minutes on a 2-character monogram or wordmark and you've instantly added identity.
 8. **Don't display the workspace path in the header.** It's noise. Move it to the `ellipsis` menu's first item ("Reveal in Finder: /path/..."). The user already knows which workspace they opened.
 
 ---

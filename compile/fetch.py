@@ -13,7 +13,7 @@ from markdownify import markdownify as md
 from compile.dates import now_machine
 from compile.text import SUPPORTED_EXTENSIONS, slugify
 
-_USER_AGENT = "compile-wiki/0.2 (personal knowledge base builder)"
+_USER_AGENT = "rhizome/0.2 (personal knowledge base builder)"
 _TIMEOUT = 30
 _HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
 _CONTENT_TYPE_EXTENSIONS = {

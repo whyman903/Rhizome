@@ -1,4 +1,4 @@
-# Compile — Wiki Maintainer Contract
+# Rhizome — Wiki Maintainer Contract
 
 You maintain a persistent, LLM-maintained wiki for Obsidian. The wiki compounds over time: every source processed and every useful answer saved should make it better.
 

@@ -8,7 +8,7 @@ The repo is a two-surface product built around one contract: a local Obsidian va
 ┌──────────────────────────────────────────────────────────────────────┐
 │                           USER SURFACES                              │
 │                                                                      │
-│   Claude Code CLI    MyWiki.app     Terminal      Obsidian.app       │
+│   Claude Code CLI    Rhizome.app     Terminal      Obsidian.app       │
 │   (slash commands)   (menu-bar)     (raw CLI)     (vault browser)    │
 └────────┬─────────────────┬──────────────┬────────────────┬───────────┘
          │                 │              │                │
@@ -57,13 +57,13 @@ The repo is a two-surface product built around one contract: a local Obsidian va
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## Swift package — MyWiki.app internals
+## Swift package — Rhizome.app internals
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│            MyWiki.app — Swift package                        │
+│            Rhizome.app — Swift package                        │
 │                                                              │
-│   MyWikiApp.swift        Window + MenuBarExtra               │
+│   RhizomeApp.swift        Window + MenuBarExtra               │
 │        │                                                     │
 │        ▼                                                     │
 │   AppModel (@Observable)                                     │
@@ -82,7 +82,7 @@ The repo is a two-surface product built around one contract: a local Obsidian va
 
 ## The system in one paragraph
 
-`compile` is a Python CLI that owns an Obsidian-compatible directory (a "workspace") with a strict layout: immutable `raw/` inputs, LLM-curated `wiki/` pages (sources, articles, maps, outputs), a per-wiki `WIKI.md` editorial schema, and `.compile/` runtime state. The CLI does deterministic work — extraction, page upsert, link scanning, health checks, rich-output rendering — and **never** synthesizes. Synthesis is delegated to Claude Code, which is wired into the workspace via templated slash commands that shell out to `compile`. `MyWiki.app` is a thin Swift menu-bar shell that embeds `compile` as a PyInstaller sidecar (`compile-bin`), streams `claude -p` responses inline for queries, opens the vault in Obsidian via the URL scheme, and hands off heavier work (ingest, Terminal-based Claude sessions) to the CLI.
+`compile` is a Python CLI that owns an Obsidian-compatible directory (a "workspace") with a strict layout: immutable `raw/` inputs, LLM-curated `wiki/` pages (sources, articles, maps, outputs), a per-wiki `WIKI.md` editorial schema, and `.compile/` runtime state. The CLI does deterministic work — extraction, page upsert, link scanning, health checks, rich-output rendering — and **never** synthesizes. Synthesis is delegated to Claude Code, which is wired into the workspace via templated slash commands that shell out to `compile`. `Rhizome.app` is a thin Swift menu-bar shell that embeds `compile` as a PyInstaller sidecar (`compile-bin`), streams `claude -p` responses inline for queries, opens the vault in Obsidian via the URL scheme, and hands off heavier work (ingest, Terminal-based Claude sessions) to the CLI.
 
 ## The three layers of the contract (from `CLAUDE.md`)
 
@@ -120,7 +120,7 @@ raw file / URL
    │     ├─ compile obsidian upsert / refresh
    │     └─ compile health
    │
-   └─► MyWiki.app "Ingest" panel → TerminalClaudeDispatcher → claude in Terminal (same flow)
+   └─► Rhizome.app "Ingest" panel → TerminalClaudeDispatcher → claude in Terminal (same flow)
 ```
 
 ### Query (ask the wiki)
@@ -131,7 +131,7 @@ question
    ├─► /query
    │     └─ compile obsidian search → page → neighbors → answer with [[wikilinks]] → optional render/upsert
    │
-   └─► MyWiki.app query window
+   └─► Rhizome.app query window
          └─ ClaudeQueryRunner runs `claude -p --output-format stream-json`
             with a wiki system-prompt addendum, streams events into QuerySession
 ```
@@ -149,19 +149,19 @@ question
 
 ## macOS app internals
 
-- `MyWikiApp.swift` — declares a `Window` (query UI) + `MenuBarExtra` (LauncherView) Scene.
+- `RhizomeApp.swift` — declares a `Window` (query UI) + `MenuBarExtra` (LauncherView) Scene.
 - `AppModel` — `@Observable` state holder; owns workspace info, query session, query history, feed store, theme/font prefs.
 - `CompileRunner` — runs `compile-bin` with `--json-output`, decodes typed envelopes (`WorkspaceEnvelope`, `SearchEnvelope`, `PageEnvelope`).
 - `ClaudeQueryRunner` — spawns `claude -p --output-format stream-json`, parses events into `ClaudeQueryEvent` cases (assistantText, toolCall, toolResult, finished, failed).
 - `TerminalClaudeDispatcher` — for non-streaming flows, launches Terminal.app in the vault directory with `claude` and ⌘V-pastes a pending prompt.
 - `Obsidian.swift` — reads `~/Library/Application Support/obsidian/obsidian.json`, installs the Advanced URI plugin on demand, opens notes / graph via `obsidian://` URLs.
 - `FeedStore` — persisted log of dispatched ingest items.
-- `scripts/build-mywiki-app.sh` — PyInstaller → `swift build -c release` → assemble `dist/MyWiki.app` → ad-hoc sign.
+- `scripts/build-rhizome-app.sh` — PyInstaller → `swift build -c release` → assemble `dist/Rhizome.app` → ad-hoc sign.
 
 ## Key design invariants
 
 - `raw/` is immutable; Claude reads but never writes.
 - The CLI never makes interpretive judgments — Claude decides *when* a Marp deck, chart, or canvas is worth saving; `outputs.py` is just the executor that runs once Claude invokes `compile render …` with prepared content.
 - Nothing is generated unsolicited. Automatic figure extraction, `source packet`, and background enrich passes are intentionally absent (the CLAUDE.md flags them as removed).
-- JSON envelopes between Swift and the sidecar are a versioned contract — the dev rules require grepping `MyWikiCore/` before changing them.
+- JSON envelopes between Swift and the sidecar are a versioned contract — the dev rules require grepping `RhizomeCore/` before changing them.
 - Status (`seed`/`emerging`/`stable`) is prompt-judged by Claude, not machine-enforced — `compile health` just flags egregious violations.

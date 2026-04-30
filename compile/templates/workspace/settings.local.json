@@ -20,7 +20,7 @@
       "Bash(uv run compile ingest raw/notion/*)",
       "Bash(uv run compile obsidian refresh)",
       "Bash(uv run compile health)",
-      "Grep(~/.local/share/uv/tools/compile-wiki/**)"
+      "Grep(~/.local/share/uv/tools/rhizome/**)"
     ]
   },
   "hooks": {
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR:-$PWD}/.compile/mywiki-bin/compile status --path . --json-output"
+            "command": "${CLAUDE_PROJECT_DIR:-$PWD}/.compile/rhizome-bin/compile status --path . --json-output"
           }
         ]
       }

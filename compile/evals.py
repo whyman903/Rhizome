@@ -426,7 +426,7 @@ def run_eval_suite(
         },
         "workspace": _workspace_payload(config, workspace_info),
         "runner": {
-            "profile": "mywiki-headless-query-command",
+            "profile": "rhizome-headless-query-command",
             "queryCommand": "/query",
             "model": DEFAULT_MODEL,
             "claudeExecutable": claude_executable,
@@ -1346,7 +1346,7 @@ def _claude_env(config: Config) -> dict[str, str]:
     existing_path = env.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
     env["PATH"] = os.pathsep.join(
         [
-            str(config.workspace_root / ".compile" / "mywiki-bin"),
+            str(config.workspace_root / ".compile" / "rhizome-bin"),
             str(Path.home() / ".claude" / "local"),
             "/opt/homebrew/bin",
             "/usr/local/bin",
