@@ -10,6 +10,7 @@ struct QueryDetailView: View {
     @FocusState private var isInputFocused: Bool
 
     private let minSidebarWidth: CGFloat = 140
+    private let defaultSidebarWidth: CGFloat = 260
     private let maxSidebarWidth: CGFloat = 420
     private let topBarHeight: CGFloat = 42
 
@@ -18,6 +19,7 @@ struct QueryDetailView: View {
             SplitViewContainer(
                 sidebarCollapsed: !sidebarVisible,
                 minSidebarWidth: minSidebarWidth,
+                defaultSidebarWidth: defaultSidebarWidth,
                 maxSidebarWidth: maxSidebarWidth,
                 autosaveName: "RhizomeSidebar"
             ) {
@@ -538,6 +540,7 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewControllerRepresentable {
     let sidebarCollapsed: Bool
     let minSidebarWidth: CGFloat
+    let defaultSidebarWidth: CGFloat
     let maxSidebarWidth: CGFloat
     let autosaveName: String
     let sidebar: Sidebar
@@ -546,6 +549,7 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
     init(
         sidebarCollapsed: Bool,
         minSidebarWidth: CGFloat,
+        defaultSidebarWidth: CGFloat,
         maxSidebarWidth: CGFloat,
         autosaveName: String,
         @ViewBuilder sidebar: () -> Sidebar,
@@ -553,10 +557,15 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
     ) {
         self.sidebarCollapsed = sidebarCollapsed
         self.minSidebarWidth = minSidebarWidth
+        self.defaultSidebarWidth = defaultSidebarWidth
         self.maxSidebarWidth = maxSidebarWidth
         self.autosaveName = autosaveName
         self.sidebar = sidebar()
         self.detail = detail()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(hasAutosavedSidebarWidth: Self.hasAutosavedSplitViewFrames(named: autosaveName))
     }
 
     func makeNSViewController(context: Context) -> NSSplitViewController {
@@ -566,10 +575,12 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
         controller.splitView.autosaveName = autosaveName
 
         let sidebarHost = NSHostingController(rootView: sidebar)
+        sidebarHost.view.frame.size.width = defaultSidebarWidth
         let sidebarItem = NSSplitViewItem(viewController: sidebarHost)
         sidebarItem.canCollapse = true
         sidebarItem.minimumThickness = minSidebarWidth
         sidebarItem.maximumThickness = maxSidebarWidth
+        sidebarItem.preferredThicknessFraction = 0.25
         sidebarItem.holdingPriority = NSLayoutConstraint.Priority(260)
         sidebarItem.isCollapsed = sidebarCollapsed
 
@@ -581,6 +592,8 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
 
         controller.addSplitViewItem(sidebarItem)
         controller.addSplitViewItem(detailItem)
+
+        scheduleDefaultSidebarWidthIfNeeded(for: controller, coordinator: context.coordinator)
 
         return controller
     }
@@ -600,6 +613,66 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
                 ctx.allowsImplicitAnimation = true
                 sidebarItem.animator().isCollapsed = sidebarCollapsed
             }
+            scheduleDefaultSidebarWidthIfNeeded(
+                for: controller,
+                coordinator: context.coordinator,
+                delay: sidebarCollapsed ? 0 : 0.24
+            )
+        } else {
+            scheduleDefaultSidebarWidthIfNeeded(for: controller, coordinator: context.coordinator)
+        }
+    }
+
+    private func scheduleDefaultSidebarWidthIfNeeded(
+        for controller: NSSplitViewController,
+        coordinator: Coordinator,
+        delay: TimeInterval = 0
+    ) {
+        guard !coordinator.hasAutosavedSidebarWidth,
+              !coordinator.didApplyDefaultSidebarWidth,
+              !sidebarCollapsed else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            applyDefaultSidebarWidthIfNeeded(for: controller, coordinator: coordinator)
+        }
+    }
+
+    private func applyDefaultSidebarWidthIfNeeded(
+        for controller: NSSplitViewController,
+        coordinator: Coordinator
+    ) {
+        guard !coordinator.hasAutosavedSidebarWidth,
+              !coordinator.didApplyDefaultSidebarWidth,
+              let sidebarItem = controller.splitViewItems.first,
+              !sidebarItem.isCollapsed else {
+            return
+        }
+
+        controller.splitView.layoutSubtreeIfNeeded()
+
+        let detailMinimumWidth: CGFloat = 320
+        let availableSidebarWidth = controller.splitView.bounds.width
+            - controller.splitView.dividerThickness
+            - detailMinimumWidth
+        let upperBound = min(maxSidebarWidth, max(minSidebarWidth, availableSidebarWidth))
+        let width = min(max(defaultSidebarWidth, minSidebarWidth), upperBound)
+
+        controller.splitView.setPosition(width, ofDividerAt: 0)
+        coordinator.didApplyDefaultSidebarWidth = true
+    }
+
+    private static func hasAutosavedSplitViewFrames(named autosaveName: String) -> Bool {
+        UserDefaults.standard.object(forKey: "NSSplitView Subview Frames \(autosaveName)") != nil
+    }
+
+    final class Coordinator {
+        let hasAutosavedSidebarWidth: Bool
+        var didApplyDefaultSidebarWidth = false
+
+        init(hasAutosavedSidebarWidth: Bool) {
+            self.hasAutosavedSidebarWidth = hasAutosavedSidebarWidth
         }
     }
 }

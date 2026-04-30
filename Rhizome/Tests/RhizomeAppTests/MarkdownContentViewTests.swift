@@ -92,6 +92,37 @@ final class MarkdownContentViewTests: XCTestCase {
     }
 
     @MainActor
+    func testRenderHTMLBodyTransformsObsidianCallouts() {
+        let html = MarkdownRenderer.renderHTMLBody(
+            """
+            > [!note]
+            > This remains visible.
+            """
+        )
+
+        XCTAssertTrue(html.contains(#"<blockquote class="callout callout-note" data-callout="note">"#))
+        XCTAssertTrue(html.contains(#"<div class="callout-title">note</div>"#))
+        XCTAssertTrue(html.contains("<p>This remains visible.</p>"))
+        XCTAssertFalse(html.contains("[!note]"))
+    }
+
+    @MainActor
+    func testRenderHTMLBodyTransformsTitledFoldedCallouts() {
+        let html = MarkdownRenderer.renderHTMLBody(
+            """
+            > [!warning]- Important caveat
+            >
+            > Check [[Planner]] before acting.
+            """
+        )
+
+        XCTAssertTrue(html.contains(#"<blockquote class="callout callout-warning" data-callout="warning">"#))
+        XCTAssertTrue(html.contains(#"<div class="callout-title">Important caveat</div>"#))
+        XCTAssertTrue(html.contains(#"<a class="wiki-link" href="rhizome://page?target=Planner">Planner</a>"#))
+        XCTAssertFalse(html.contains("[!warning]"))
+    }
+
+    @MainActor
     func testRenderHTMLDocumentIncludesLocalRendererAssets() {
         let html = MarkdownContentView.renderHTMLDocument("Formula \\(x\\).")
 
