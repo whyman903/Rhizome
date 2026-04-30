@@ -5,7 +5,7 @@ import RhizomeCore
 struct QueryDetailView: View {
     @Bindable var model: AppModel
     @State private var followUpText = ""
-    @State private var sidebarVisible = false
+    @AppStorage("RhizomeSidebarVisible") private var sidebarVisible = false
     @State private var showSettings = false
     @FocusState private var isInputFocused: Bool
 
@@ -169,7 +169,8 @@ struct QueryDetailView: View {
 
             if model.querySession.status == .running && model.querySession.assistantText.isEmpty {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
+                    QueryGraphLoadingIndicator(color: EditorialPalette.accent)
+                        .frame(width: 24, height: 24)
                     Text(model.querySession.statusDetail.isEmpty
                          ? "Starting…" : model.querySession.statusDetail)
                         .font(.system(size: 13, design: activeFont.design).italic())
@@ -379,6 +380,130 @@ struct QueryDetailView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 4)
+    }
+}
+
+private struct QueryGraphLoadingIndicator: View {
+    let color: Color
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let nodes: [GraphNode] = [
+        GraphNode(x: 380, y: 380, radius: 74),
+        GraphNode(x: 640, y: 540, radius: 60),
+        GraphNode(x: 200, y: 220, radius: 42),
+        GraphNode(x: 600, y: 280, radius: 42),
+        GraphNode(x: 280, y: 600, radius: 42),
+        GraphNode(x: 820, y: 420, radius: 42),
+        GraphNode(x: 780, y: 780, radius: 42),
+        GraphNode(x: 500, y: 800, radius: 42),
+    ]
+    private let edges: [(Int, Int)] = [
+        (0, 2), (0, 3), (0, 4), (0, 1),
+        (1, 5), (1, 6), (1, 7),
+        (4, 7), (3, 5),
+    ]
+    private let pulseOrder = [2, 0, 3, 5, 1, 6, 7, 4]
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+            Canvas { context, size in
+                drawGraph(
+                    in: &context,
+                    size: size,
+                    elapsed: reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func drawGraph(in context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {
+        let scale = min(size.width, size.height) / 1024
+        let xOffset = (size.width - 1024 * scale) / 2
+        let yOffset = (size.height - 1024 * scale) / 2
+        let edgeWidth = max(1.1, 40 * scale)
+
+        for (a, b) in edges {
+            let start = point(for: nodes[a], scale: scale, xOffset: xOffset, yOffset: yOffset)
+            let end = point(for: nodes[b], scale: scale, xOffset: xOffset, yOffset: yOffset)
+            let activity = max(pulseAmount(for: a, elapsed: elapsed), pulseAmount(for: b, elapsed: elapsed))
+            var path = Path()
+            path.move(to: start)
+            path.addLine(to: end)
+            context.stroke(
+                path,
+                with: .color(color.opacity(0.16 + activity * 0.18)),
+                style: StrokeStyle(lineWidth: edgeWidth, lineCap: .round)
+            )
+        }
+
+        for (index, node) in nodes.enumerated() {
+            let activity = pulseAmount(for: index, elapsed: elapsed)
+            let center = point(for: node, scale: scale, xOffset: xOffset, yOffset: yOffset)
+            let radius = max(1.8, node.radius * scale * (1 + activity * 0.26))
+            let glowRadius = radius * (2.0 + activity * 1.25)
+
+            if activity > 0.02 {
+                context.fill(
+                    Path(ellipseIn: CGRect(
+                        x: center.x - glowRadius,
+                        y: center.y - glowRadius,
+                        width: glowRadius * 2,
+                        height: glowRadius * 2
+                    )),
+                    with: .color(color.opacity(activity * 0.14))
+                )
+            }
+
+            context.fill(
+                Path(ellipseIn: CGRect(
+                    x: center.x - radius,
+                    y: center.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )),
+                with: .color(color.opacity(0.34 + activity * 0.66))
+            )
+        }
+    }
+
+    private func pulseAmount(for nodeIndex: Int, elapsed: TimeInterval) -> Double {
+        guard let orderIndex = pulseOrder.firstIndex(of: nodeIndex) else {
+            return 0
+        }
+
+        let stepDuration = 0.23
+        let cycleDuration = stepDuration * Double(pulseOrder.count)
+        let nodeTime = Double(orderIndex) * stepDuration
+        let age = (elapsed - nodeTime).truncatingRemainder(dividingBy: cycleDuration)
+        let normalizedAge = age >= 0 ? age : age + cycleDuration
+
+        guard normalizedAge < 0.48 else {
+            return 0
+        }
+
+        let attack = min(normalizedAge / 0.12, 1)
+        let fade = max(0, 1 - ((normalizedAge - 0.12) / 0.36))
+        return max(0, min(1, attack * fade))
+    }
+
+    private func point(
+        for node: GraphNode,
+        scale: CGFloat,
+        xOffset: CGFloat,
+        yOffset: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: xOffset + node.x * scale,
+            y: yOffset + node.y * scale
+        )
+    }
+
+    private struct GraphNode {
+        let x: CGFloat
+        let y: CGFloat
+        let radius: CGFloat
     }
 }
 

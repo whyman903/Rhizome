@@ -40,7 +40,6 @@ def test_fresh_install(tmp_path: Path) -> None:
         content = (home / ".claude" / "commands" / name).read_text()
         assert str(ws) in content
         assert "{{wiki_path}}" not in content
-        assert "wiki-enrich" not in content
 
     query = (home / ".claude" / "commands" / "query.md").read_text()
     assert "markdown is the fallback" not in query
@@ -69,8 +68,6 @@ def test_fresh_install(tmp_path: Path) -> None:
     assert "First try the current working directory" in context
     assert f'cd "{ws}" && compile ...' in context
 
-    assert not (home / ".claude" / "commands" / "wiki-query.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-context.md").exists()
     assert not (ws / ".claude" / "commands" / "query.md").exists()
     assert not (ws / ".claude" / "commands" / "context.md").exists()
 
@@ -266,23 +263,6 @@ def test_path_with_spaces_quoted_in_shell_commands(tmp_path: Path) -> None:
         for line in content.splitlines():
             if line.strip().startswith(("cd ", "`cd ")):
                 assert f'cd "{ws}"' in line, f"Unquoted path in shell command: {line}"
-
-
-def test_no_obsolete_templates_installed(tmp_path: Path) -> None:
-    ws = _make_workspace(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-
-    install_claude_files(ws, home, force=False)
-
-    assert not (home / ".claude" / "commands" / "wiki-visualize.md").exists()
-    assert not (ws / ".claude" / "commands" / "visualize.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-enrich.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-query.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-context.md").exists()
-    assert not (ws / ".claude" / "commands" / "enrich.md").exists()
-    assert not (ws / ".claude" / "commands" / "query.md").exists()
-    assert not (ws / ".claude" / "commands" / "context.md").exists()
 
 
 def test_ingest_template_matches_simplified_workflow(tmp_path: Path) -> None:

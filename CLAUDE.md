@@ -26,35 +26,52 @@ uv run compile claude setup /tmp/test-wiki
 uv run compile ingest example.md -p /tmp/test-wiki
 
 # macOS app
-./scripts/build-rhizome-app.sh            # produces dist/Rhizome.app
+./scripts/build.sh                        # produces dist/Rhizome.app and launches it
+./scripts/build.sh --update               # also runs `compile claude setup --force`
+                                          # against $RHIZOME_DEV_WORKSPACE (default ~/wiki)
 swift test --package-path Rhizome         # Swift test suite
 ```
 
+Set `RHIZOME_SKIP_LAUNCH=1` (or run under `CI`) to skip the post-build app launch.
+
 ## Module Map
 
-### Python CLI
+### Python CLI (`compile/`)
 
-- `compile/cli.py` — command surface and Claude setup/install logic.
-- `compile/text.py` — source extraction and normalization.
-- `compile/ingest.py` — source-note artifact assembly and rendering.
-- `compile/obsidian.py` — vault scanning, search, upsert, and graph helpers.
-- `compile/workspace.py` — workspace state, status, processing, and generated files.
-- `compile/outputs.py` — explicit renderers for Marp, chart, and canvas outputs.
-- `compile/fetch.py` — URL ingestion and optional image download for web sources.
-- `compile/health.py` / `compile/verify.py` — structural and editorial health reporting.
-- `compile/search_index.py` — SQLite FTS index for PDF chunks.
-- `compile/templates/global/` — installed into `~/.claude/commands/` (context-aware commands available from any session).
-- `compile/templates/workspace/` — installed into each wiki (`CLAUDE.md`, `.claude/commands/*.md`, `.claude/settings.local.json`).
-- `compile/resources.py` — resolves template paths in both `uv tool` installs and the PyInstaller bundle.
+- `cli.py` — Click command surface (`init`, `status`, `ingest`, `health`, `schema`, plus `obsidian`, `suggest`, `review`, `index`, `render`, `eval`, `claude` subgroups).
+- `config.py` — workspace config loader (`config.yaml`, `.env`, env-var overrides).
+- `dates.py` — frontmatter / machine timestamp formatting.
+- `text.py` — source extraction and normalization.
+- `markdown.py` — wikilink, fence, callout, and frontmatter helpers shared across modules.
+- `page_types.py` — canonical page-type, maturity, and output-format vocabularies.
+- `ingest.py` — source-note artifact assembly and rendering.
+- `pdf_artifacts.py` — cached PDF page extraction artifacts (`raw/.extracted/`).
+- `obsidian.py` — vault scanning, search, upsert, and graph helpers.
+- `workspace.py` — workspace state, status, processing, and generated files.
+- `outputs.py` — explicit renderers for Marp, chart, and canvas outputs.
+- `fetch.py` — URL ingestion and optional image download for web sources.
+- `health.py` / `verify.py` — structural and editorial health reporting.
+- `search_index.py` — SQLite FTS index for PDF chunks.
+- `suggest.py` — map-page suggestion heuristics.
+- `evals.py` — headless `claude -p` eval harness used by `compile eval init|run`.
+- `resources.py` — resolves template paths in both `uv tool` installs and the PyInstaller bundle.
+- `templates/global/` — installed into `~/.claude/commands/` (cross-wiki commands).
+- `templates/workspace/` — installed into each wiki (`CLAUDE.md`, `.claude/commands/*.md`, `.claude/settings.local.json`).
 
-### macOS app
+### macOS app (`Rhizome/`)
 
-- `Rhizome/Package.swift` — SwiftPM package definition (macOS 14+, arm64).
-- `Rhizome/Sources/RhizomeApp/` — SwiftUI app (menu-bar extra + query window).
-- `Rhizome/Sources/RhizomeCore/` — headless logic: `CompileRunner` (sidecar RPC), `ClaudeQueryRunner` (streaming `claude -p`), `AppModel`, `FeedStore`, `Obsidian` (URL scheme opener).
-- `Rhizome/support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
-- `Rhizome/support/Info.plist` / `AppIcon.icns` — bundle metadata.
-- `scripts/build-rhizome-app.sh` — builds sidecar + Swift product, assembles and ad-hoc signs `dist/Rhizome.app`.
+- `Package.swift` — SwiftPM package (macOS 14+, depends on `swift-cmark` for the markdown renderer).
+- `Sources/RhizomeApp/` — SwiftUI menu-bar app:
+  - `RhizomeApp.swift`, `MenuBarIcon.swift`, `LauncherView.swift`, `SettingsView.swift`, `QueryDetailView.swift` — UI surface.
+  - `MarkdownRenderer.swift`, `MarkdownContentView.swift`, `MarkdownHTMLPostprocessor.swift`, `MarkdownMathProtector.swift`, `EditorialTheme.swift`, `BundleAssetSchemeHandler.swift` — markdown → HTML pipeline served to a `WKWebView` with bundled KaTeX, Mermaid, and DOMPurify under `Resources/web/`.
+- `Sources/RhizomeCore/` — headless logic:
+  - `CompileRunning.swift` (protocol), `CompileRunner.swift` (sidecar RPC), `CompileEvent.swift` (streamed ingest events), `WorkspaceInfo.swift`, `WikiSearch.swift`, `WikilinkParser.swift`.
+  - `ClaudeQueryRunner.swift` (streaming `claude -p`), `QuerySession.swift` (resumable threads), `ClaudeDispatcher.swift` (Terminal hand-off).
+  - `AppModel.swift`, `FeedStore.swift`, `Obsidian.swift` (URL scheme opener), `TerminalLauncher.swift`, `AppLogger.swift`.
+- `Tests/RhizomeCoreTests/` and `Tests/RhizomeAppTests/` — Swift Testing suites covering the sidecar contract, query sessions, markdown rendering, and Obsidian/Terminal launch.
+- `support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
+- `support/Info.plist` / `AppIcon.icns` — bundle metadata.
+- `scripts/build.sh` — builds sidecar + Swift product, assembles and ad-hoc signs `dist/Rhizome.app`.
 
 ## Development Rules
 
@@ -63,7 +80,7 @@ swift test --package-path Rhizome         # Swift test suite
 - Preserve backward compatibility only where it protects existing workspaces with low complexity.
 - When you add a CLI command that needs Claude Code integration, add a template under `compile/templates/workspace/commands/` (or `global/` for cross-wiki commands) — the `compile claude setup` flow installs every file in those directories automatically.
 - When you change a template, bump the matching behavior tests under `tests/test_claude_setup.py` and verify `compile claude setup --force` refreshes existing workspaces cleanly.
-- The Swift layer assumes the sidecar emits stable JSON envelopes (`--json-output` / `--json-stream`). Before changing a command's JSON shape, grep `Rhizome/Sources/RhizomeCore/` for the matching decoder.
+- The Swift layer assumes the sidecar emits stable JSON envelopes (`--json-output` / `--json-stream`). Before changing a command's JSON shape, grep `Rhizome/Sources/RhizomeCore/` for the matching decoder (typically in `CompileRunner.swift`, `WorkspaceInfo.swift`, `WikiSearch.swift`, or `CompileEvent.swift`).
 
 ## Release Standard
 
@@ -78,6 +95,6 @@ Before finishing a change:
    uv run compile status -p /tmp/smoke
    uv run compile health -p /tmp/smoke
    ```
-4. If templates changed, confirm `compile claude setup <existing-wiki> --force` produces the expected diff (no stray files, obsolete templates removed, settings merged).
-5. If the Mac app changed, rebuild with `./scripts/build-rhizome-app.sh` and verify the bundle launches (`open dist/Rhizome.app`).
+4. If templates changed, confirm `compile claude setup <existing-wiki> --force` produces the expected diff (no stray files, settings merged).
+5. If the Mac app changed, rebuild with `./scripts/build.sh` and verify the bundle launches (`open dist/Rhizome.app`).
 6. Confirm `README.md`, this file, and `compile/templates/workspace/CLAUDE.md` still reflect actual behavior.

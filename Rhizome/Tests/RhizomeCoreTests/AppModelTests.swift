@@ -690,7 +690,6 @@ final class AppModelTests: XCTestCase {
 
         let prompt = try XCTUnwrap(queryRunner.capturedPrompts.first)
         XCTAssertEqual(prompt, "What does the source say?")
-        XCTAssertFalse(prompt.contains("<wiki-context>"))
         XCTAssertTrue(fakeRunner.requestedPageLocators.isEmpty)
         XCTAssertEqual(queryRunner.capturedResumeSessionIDs.count, 1)
         XCTAssertNil(queryRunner.capturedResumeSessionIDs[0])

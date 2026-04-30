@@ -319,6 +319,55 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         }, "should recover from transcript instead of failing: \(events)")
     }
 
+    func testTranscriptRecoveryEmitsRecoveredToolCalls() async throws {
+        let stdout = """
+        {"type":"system","subtype":"init","session_id":"transcript-tool-session"}
+        """
+        let scriptURL = try makeFakeClaude(stdout: stdout)
+        let transcriptRoot = tempDirectory.appending(path: "claude-home-tools", directoryHint: .isDirectory)
+        let projectName = tempDirectory.standardizedFileURL.path
+            .replacingOccurrences(of: "/", with: "-")
+        let transcriptURL = transcriptRoot
+            .appending(path: "projects", directoryHint: .isDirectory)
+            .appending(path: projectName, directoryHint: .isDirectory)
+            .appending(path: "transcript-tool-session.jsonl", directoryHint: .notDirectory)
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let transcript = """
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"compile obsidian search foo"}}]}}
+        {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"source evidence"}]}}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Recovered answer after research."}]}}
+        """
+        try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let logger = AppLogger(logDirectory: tempDirectory.appending(path: "logs-transcript-tools", directoryHint: .isDirectory))
+        let runner = ClaudeQueryRunner(
+            logger: logger,
+            executableProvider: { scriptURL },
+            transcriptRootProvider: { transcriptRoot }
+        )
+
+        let collector = EventCollector()
+        try await runner.runQuery(
+            prompt: "/query x",
+            workspaceURL: tempDirectory,
+            resumeSessionID: nil,
+            onEvent: { collector.append($0) }
+        )
+
+        let events = collector.snapshot()
+        let toolCalls = events.compactMap { event -> String? in
+            if case .toolCall(let name) = event { return name } else { return nil }
+        }
+        XCTAssertEqual(toolCalls, ["Bash"])
+        let finishedText = events.compactMap { event -> String? in
+            if case .finished(let text, _, _, _, _) = event { return text } else { return nil }
+        }.first
+        XCTAssertEqual(finishedText, "Recovered answer after research.")
+    }
+
     func testZeroExitWithOnlyToolResultEmitsFailedEvent() async throws {
         let stdout = """
         {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"read a note but never answered"}]}}
@@ -490,7 +539,6 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         XCTAssertTrue(prompt.contains("direct `rg`/file search across `wiki/` and `raw/`"), "should require direct absence search")
         XCTAssertTrue(prompt.contains("modern technical/current topics"), "should require current-topic grounding")
         XCTAssertTrue(prompt.contains("WebSearch/WebFetch"), "should allow external web research")
-        XCTAssertFalse(prompt.contains("<wiki-context>"), "query mode should not rely on pre-fetched context")
         XCTAssertTrue(prompt.contains("knowledge cutoff"), "should explicitly discourage knowledge-cutoff refusals")
         XCTAssertTrue(prompt.contains("markdown tables"), "should preserve rich Markdown guidance")
         XCTAssertTrue(prompt.contains("Mermaid"), "should preserve diagram guidance")

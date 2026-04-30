@@ -191,6 +191,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
                     case .parsed(let lineSummary):
                         summary.sawAssistantText = summary.sawAssistantText || lineSummary.emittedAssistantText
                         summary.sawFinished = summary.sawFinished || lineSummary.emittedFinished
+                        summary.sawToolCall = summary.sawToolCall || !lineSummary.emittedToolCallNames.isEmpty
                         if let sessionID = lineSummary.sessionID, !sessionID.isEmpty {
                             summary.sessionID = sessionID
                         }
@@ -260,6 +261,11 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
                 logger: logger
             ) {
                 logger.log("ClaudeQueryRunner recovered final answer from Claude transcript for session \(recovered.sessionID)")
+                if !stdoutSummary.sawToolCall {
+                    for toolName in recovered.toolNames {
+                        await onEvent(.toolCall(name: toolName))
+                    }
+                }
                 await onEvent(.assistantText(recovered.text))
                 await onEvent(.finished(
                     text: recovered.text,
@@ -377,6 +383,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         var unparsedBuffer = Data()
         var sawAssistantText = false
         var sawFinished = false
+        var sawToolCall = false
         var sessionID: String?
         var lastTextOnlyAssistantText: String?
         var lastToolResultPreview: String?
@@ -399,6 +406,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
     private struct StreamLineSummary: Sendable {
         var emittedAssistantText = false
         var emittedFinished = false
+        var emittedToolCallNames: [String] = []
         var sessionID: String?
         var textOnlyAssistantText: String?
         var toolResultPreview: String?
@@ -444,6 +452,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             }
             for name in toolNames {
                 await onEvent(.toolCall(name: name))
+                summary.emittedToolCallNames.append(name)
             }
         case "user":
             guard let message = json["message"] as? [String: Any],
@@ -570,6 +579,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
     private struct TranscriptRecovery: Sendable {
         let text: String
         let sessionID: String
+        let toolNames: [String]
     }
 
     private static func recoverTranscriptAnswer(
@@ -589,8 +599,8 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         )
 
         for attempt in 0..<5 {
-            if let text = readFinalAssistantTextAfterLatestToolResult(from: transcriptURL) {
-                return TranscriptRecovery(text: text, sessionID: sessionID)
+            if let recovery = readTranscriptRecovery(from: transcriptURL, sessionID: sessionID) {
+                return recovery
             }
             if attempt < 4 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
@@ -614,13 +624,14 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             .appending(path: "\(sessionID).jsonl", directoryHint: .notDirectory)
     }
 
-    private static func readFinalAssistantTextAfterLatestToolResult(from url: URL) -> String? {
+    private static func readTranscriptRecovery(from url: URL, sessionID: String) -> TranscriptRecovery? {
         guard let data = try? Data(contentsOf: url),
               let contents = String(data: data, encoding: .utf8) else {
             return nil
         }
 
         var answerAfterLatestTool: String?
+        var toolNames: [String] = []
         var sawToolResult = false
 
         for line in contents.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -643,7 +654,12 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
                 continue
             }
 
-            if content.contains(where: { ($0["type"] as? String) == "tool_use" }) {
+            let names = content.compactMap { block -> String? in
+                guard (block["type"] as? String) == "tool_use" else { return nil }
+                return block["name"] as? String
+            }
+            if !names.isEmpty {
+                toolNames.append(contentsOf: names)
                 answerAfterLatestTool = nil
                 continue
             }
@@ -661,7 +677,11 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             }
         }
 
-        return answerAfterLatestTool
+        guard let text = answerAfterLatestTool else {
+            return nil
+        }
+
+        return TranscriptRecovery(text: text, sessionID: sessionID, toolNames: toolNames)
     }
 
     private static func emptySuccessfulRunMessage(
