@@ -6,19 +6,21 @@ public enum AppTheme: String, CaseIterable, Codable, Sendable {
     case ivory
     case obsidian
     case umber
+    case nebula
 
     public var displayName: String {
         switch self {
         case .ivory: return "Ivory"
         case .obsidian: return "Obsidian"
         case .umber: return "Umber"
+        case .nebula: return "Nebula"
         }
     }
 
     public var prefersDarkMode: Bool {
         switch self {
         case .ivory: return false
-        case .obsidian, .umber: return true
+        case .obsidian, .umber, .nebula: return true
         }
     }
 }

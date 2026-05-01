@@ -78,11 +78,27 @@ struct ThemeColorSet {
         warning:       Color(red: 0.8500, green: 0.5200, blue: 0.3200)
     )
 
+    static let nebula = ThemeColorSet(
+        background:    Color(red: 0.035, green: 0.035, blue: 0.045),
+        backgroundTop: Color(red: 0.060, green: 0.060, blue: 0.075),
+        surface:       Color(red: 0.090, green: 0.090, blue: 0.110),
+        surfaceHover:  Color(red: 0.130, green: 0.130, blue: 0.155),
+        border:        Color(red: 0.180, green: 0.180, blue: 0.210),
+        borderHover:   Color(red: 0.240, green: 0.230, blue: 0.290),
+        textPrimary:   Color(red: 0.980, green: 0.980, blue: 0.985),
+        textSecondary: Color(red: 0.700, green: 0.700, blue: 0.720),
+        textTertiary:  Color(red: 0.460, green: 0.460, blue: 0.490),
+        accent:        Color(red: 0.706, green: 0.502, blue: 0.945),
+        accentHover:   Color(red: 0.792, green: 0.620, blue: 0.980),
+        warning:       Color(red: 0.949, green: 0.420, blue: 0.620)
+    )
+
     static func forTheme(_ theme: AppTheme) -> ThemeColorSet {
         switch theme {
         case .ivory: return .ivory
         case .obsidian: return .obsidian
         case .umber: return .umber
+        case .nebula: return .nebula
         }
     }
 }
@@ -104,7 +120,7 @@ enum EditorialPalette {
         switch activeTheme {
         case .obsidian:
             return Color(red: 0.520, green: 0.740, blue: 1.000)
-        case .ivory, .umber:
+        case .ivory, .umber, .nebula:
             return colors.accent
         }
     }
