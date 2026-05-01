@@ -2,7 +2,7 @@ import Foundation
 
 public enum ClaudeQueryEvent: Sendable {
     case assistantText(String)
-    case toolCall(name: String)
+    case toolCall(name: String, input: [String: String])
     case toolResult(preview: String)
     case finished(text: String, costUSD: Double?, durationMs: Int?, permissionDenials: [String], sessionID: String?)
     case failed(message: String)
@@ -113,7 +113,10 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         Always answer the user's question. Search the wiki first and prefer wiki-grounded \
         answers: when the wiki covers a claim, cite it inline with an Obsidian [[Page Title]] \
         wikilink to the page you read it from, for example: The policy shift was driven by X \
-        ([[Policy Timeline]]). When the wiki partially covers the question, use the wiki for \
+        ([[Policy Timeline]]). If you read a wiki page during research, every paragraph or \
+        bullet group that summarizes that page must include at least one [[Page Title]] \
+        citation to it — answers that summarize wiki pages without inline wikilinks will be \
+        rejected and retried. When the wiki partially covers the question, use the wiki for \
         what it supports and answer the rest from web search or general knowledge. Make clear \
         which claims are wiki-backed (with `[[wikilinks]]`), which are web-backed, and which are \
         general knowledge. When the wiki does not cover the question at all, answer from web-backed \
@@ -152,6 +155,10 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         if executableSupportsOption(executable, option: "--exclude-dynamic-system-prompt-sections") {
             let insertIndex = claudeArgs.firstIndex(of: "--append-system-prompt") ?? max(claudeArgs.count - 1, 0)
             claudeArgs.insert("--exclude-dynamic-system-prompt-sections", at: insertIndex)
+        }
+        if executableSupportsOption(executable, option: "--tools ") {
+            let insertIndex = claudeArgs.firstIndex(of: "--allowedTools") ?? max(claudeArgs.count - 1, 0)
+            claudeArgs.insert(contentsOf: ["--tools", "Read,Grep,Glob,LS,Bash,Task,WebSearch,WebFetch"], at: insertIndex)
         }
         if let resumeSessionID, !resumeSessionID.isEmpty {
             claudeArgs.insert(contentsOf: ["--resume", resumeSessionID], at: 1)
@@ -262,8 +269,8 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             ) {
                 logger.log("ClaudeQueryRunner recovered final answer from Claude transcript for session \(recovered.sessionID)")
                 if !stdoutSummary.sawToolCall {
-                    for toolName in recovered.toolNames {
-                        await onEvent(.toolCall(name: toolName))
+                    for toolUse in recovered.toolUses {
+                        await onEvent(.toolCall(name: toolUse.name, input: toolUse.input))
                     }
                 }
                 await onEvent(.assistantText(recovered.text))
@@ -440,19 +447,21 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
                 guard (block["type"] as? String) == "text" else { return nil }
                 return block["text"] as? String
             }
-            let toolNames = content.compactMap { block -> String? in
-                guard (block["type"] as? String) == "tool_use" else { return nil }
-                return block["name"] as? String
+            let toolUses = content.compactMap { block -> (name: String, input: [String: String])? in
+                guard (block["type"] as? String) == "tool_use",
+                      let name = block["name"] as? String else { return nil }
+                let input = Self.stringInput(from: block["input"])
+                return (name, input)
             }
             let joined = texts.joined()
-            if !joined.isEmpty && toolNames.isEmpty {
+            if !joined.isEmpty && toolUses.isEmpty {
                 await onEvent(.assistantText(joined))
                 summary.emittedAssistantText = true
                 summary.textOnlyAssistantText = joined
             }
-            for name in toolNames {
-                await onEvent(.toolCall(name: name))
-                summary.emittedToolCallNames.append(name)
+            for toolUse in toolUses {
+                await onEvent(.toolCall(name: toolUse.name, input: toolUse.input))
+                summary.emittedToolCallNames.append(toolUse.name)
             }
         case "user":
             guard let message = json["message"] as? [String: Any],
@@ -579,7 +588,26 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
     private struct TranscriptRecovery: Sendable {
         let text: String
         let sessionID: String
-        let toolNames: [String]
+        let toolUses: [TranscriptToolUse]
+    }
+
+    private struct TranscriptToolUse: Sendable {
+        let name: String
+        let input: [String: String]
+    }
+
+    /// Pull only string-valued top-level fields out of a `tool_use.input` payload.
+    /// That covers the wiki-citation guard's needs (Bash `command`, Read `file_path`)
+    /// without dragging arbitrary JSON across actor boundaries.
+    private static func stringInput(from raw: Any?) -> [String: String] {
+        guard let dict = raw as? [String: Any] else { return [:] }
+        var result: [String: String] = [:]
+        for (key, value) in dict {
+            if let stringValue = value as? String {
+                result[key] = stringValue
+            }
+        }
+        return result
     }
 
     private static func recoverTranscriptAnswer(
@@ -631,7 +659,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         }
 
         var answerAfterLatestTool: String?
-        var toolNames: [String] = []
+        var toolUses: [TranscriptToolUse] = []
         var sawToolResult = false
 
         for line in contents.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -654,12 +682,13 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
                 continue
             }
 
-            let names = content.compactMap { block -> String? in
-                guard (block["type"] as? String) == "tool_use" else { return nil }
-                return block["name"] as? String
+            let uses = content.compactMap { block -> TranscriptToolUse? in
+                guard (block["type"] as? String) == "tool_use",
+                      let name = block["name"] as? String else { return nil }
+                return TranscriptToolUse(name: name, input: stringInput(from: block["input"]))
             }
-            if !names.isEmpty {
-                toolNames.append(contentsOf: names)
+            if !uses.isEmpty {
+                toolUses.append(contentsOf: uses)
                 answerAfterLatestTool = nil
                 continue
             }
@@ -681,7 +710,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             return nil
         }
 
-        return TranscriptRecovery(text: text, sessionID: sessionID, toolNames: toolNames)
+        return TranscriptRecovery(text: text, sessionID: sessionID, toolUses: toolUses)
     }
 
     private static func emptySuccessfulRunMessage(

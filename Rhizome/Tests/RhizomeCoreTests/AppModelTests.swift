@@ -79,7 +79,7 @@ private final class SuccessfulQueryRunner: ClaudeQueryRunning, @unchecked Sendab
         onEvent: @escaping @Sendable (ClaudeQueryEvent) async -> Void
     ) async throws {
         onRun()
-        await onEvent(.toolCall(name: "Grep"))
+        await onEvent(.toolCall(name: "Grep", input: [:]))
         await onEvent(.finished(
             text: "answer",
             costUSD: 0.01,
@@ -130,7 +130,7 @@ private final class CapturingQueryRunner: ClaudeQueryRunning, @unchecked Sendabl
             prompts.append(prompt)
             resumeIDs.append(resumeSessionID)
         }
-        await onEvent(.toolCall(name: "Grep"))
+        await onEvent(.toolCall(name: "Grep", input: [:]))
         await onEvent(.finished(
             text: "answer",
             costUSD: nil,
@@ -209,7 +209,7 @@ private final class ExpiringResumeQueryRunner: ClaudeQueryRunning, @unchecked Se
         if shouldFail {
             throw ClaudeQueryResumeUnavailableError(message: "Session not found")
         }
-        await onEvent(.toolCall(name: "Grep"))
+        await onEvent(.toolCall(name: "Grep", input: [:]))
         await onEvent(.finished(
             text: "fallback answer",
             costUSD: nil,
@@ -721,7 +721,7 @@ final class AppModelTests: XCTestCase {
                     ),
                 ],
                 [
-                    .toolCall(name: "Grep"),
+                    .toolCall(name: "Grep", input: [:]),
                     .finished(
                         text: "researched answer",
                         costUSD: nil,
@@ -848,7 +848,7 @@ final class AppModelTests: XCTestCase {
         let queryRunner = ScriptedQueryRunner(
             scripts: [
                 [
-                    .toolCall(name: "LS"),
+                    .toolCall(name: "LS", input: [:]),
                     .finished(
                         text: "directory-only answer",
                         costUSD: nil,
@@ -858,7 +858,7 @@ final class AppModelTests: XCTestCase {
                     ),
                 ],
                 [
-                    .toolCall(name: "Grep"),
+                    .toolCall(name: "Grep", input: [:]),
                     .finished(
                         text: "content-searched answer",
                         costUSD: nil,
@@ -925,12 +925,12 @@ final class AppModelTests: XCTestCase {
                     ),
                 ],
                 [
-                    .toolCall(name: "Bash"),
+                    .toolCall(name: "Bash", input: [:]),
                     .toolResult(preview: "System design networking page"),
                     .failed(message: "Claude exited before producing an answer. The last stream output was incomplete or not valid JSON:")
                 ],
                 [
-                    .toolCall(name: "Grep"),
+                    .toolCall(name: "Grep", input: [:]),
                     .finished(
                         text: "final researched answer",
                         costUSD: nil,
@@ -991,7 +991,7 @@ final class AppModelTests: XCTestCase {
         let queryRunner = ScriptedQueryRunner(
             scripts: [
                 [
-                    .toolCall(name: "Bash"),
+                    .toolCall(name: "Bash", input: [:]),
                     .finished(
                         text: "researched once",
                         costUSD: nil,
@@ -1028,6 +1028,317 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(queryRunner.capturedPrompts, ["Find all notes about GRPO"])
         XCTAssertEqual(model.querySession.assistantText, "researched once")
+    }
+
+    func testWikiPageReadWithoutCitationTriggersCitationRetry() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-citation-retry", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        let info = WorkspaceInfo(
+            path: workspaceURL.path,
+            topic: "Rhizome",
+            description: "Test workspace",
+            rawFiles: 0,
+            processed: 0,
+            unprocessed: 0,
+            needsDocumentReview: 0,
+            wikiPageCount: 1
+        )
+        let queryRunner = ScriptedQueryRunner(
+            scripts: [
+                [
+                    .toolCall(
+                        name: "Bash",
+                        input: ["command": "compile obsidian page \"Land of Open Graves — Ch. 1 (DeLeon 2015)\""]
+                    ),
+                    .toolResult(preview: "Page content"),
+                    .finished(
+                        text: "DeLeon argues that the desert acts as a weapon against migrants.",
+                        costUSD: nil,
+                        durationMs: nil,
+                        permissionDenials: [],
+                        sessionID: "first-session"
+                    ),
+                ],
+                [
+                    .finished(
+                        text: "DeLeon argues the desert acts as a weapon against migrants ([[Land of Open Graves — Ch. 1 (DeLeon 2015)]]).",
+                        costUSD: nil,
+                        durationMs: nil,
+                        permissionDenials: [],
+                        sessionID: "citation-session"
+                    ),
+                ],
+            ]
+        )
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let model = AppModel(
+            runner: FakeCompileRunner(
+                workspaceInfo: info,
+                pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")
+            ),
+            dispatcher: NoopDispatcher(),
+            queryRunner: queryRunner,
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-citation-retry", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.sendQuery("what does deleon say in his chapters?")
+
+        await waitUntil {
+            model.querySession.status == .completed && queryRunner.capturedPrompts.count == 2
+        }
+
+        XCTAssertEqual(queryRunner.capturedPrompts.count, 2)
+        XCTAssertEqual(queryRunner.capturedPrompts[0], "what does deleon say in his chapters?")
+        XCTAssertTrue(queryRunner.capturedPrompts[1].contains("did not include any [[Page Title]] wikilink citations"))
+        XCTAssertTrue(queryRunner.capturedPrompts[1].contains("[[Land of Open Graves — Ch. 1 (DeLeon 2015)]]"))
+        XCTAssertTrue(queryRunner.capturedPrompts[1].contains("what does deleon say in his chapters?"))
+        XCTAssertEqual(queryRunner.capturedResumeSessionIDs[1], "first-session")
+        XCTAssertTrue(model.querySession.assistantText.contains("[[Land of Open Graves — Ch. 1 (DeLeon 2015)]]"))
+        XCTAssertEqual(model.querySession.claudeSessionID, "citation-session")
+        XCTAssertEqual(model.queryHistory.first?.turns.count, 1)
+        XCTAssertFalse(model.queryHistory.first?.turns.contains {
+            $0.answer == "DeLeon argues that the desert acts as a weapon against migrants."
+        } ?? true)
+    }
+
+    func testDirectWikiReadWithoutCitationTriggersCitationRetry() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-read-citation-retry", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        let info = WorkspaceInfo(
+            path: workspaceURL.path,
+            topic: "Rhizome",
+            description: "Test workspace",
+            rawFiles: 0,
+            processed: 0,
+            unprocessed: 0,
+            needsDocumentReview: 0,
+            wikiPageCount: 1
+        )
+        let readPath = workspaceURL
+            .appending(path: "wiki/sources/Foo Source.md", directoryHint: .notDirectory)
+            .path
+        let queryRunner = ScriptedQueryRunner(
+            scripts: [
+                [
+                    .toolCall(
+                        name: "Read",
+                        input: ["file_path": readPath]
+                    ),
+                    .toolResult(preview: "Page content"),
+                    .finished(
+                        text: "Foo says the project needs citations.",
+                        costUSD: nil,
+                        durationMs: nil,
+                        permissionDenials: [],
+                        sessionID: "read-session"
+                    ),
+                ],
+                [
+                    .finished(
+                        text: "Foo says the project needs citations ([[Foo Source]]).",
+                        costUSD: nil,
+                        durationMs: nil,
+                        permissionDenials: [],
+                        sessionID: "read-citation-session"
+                    ),
+                ],
+            ]
+        )
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let model = AppModel(
+            runner: FakeCompileRunner(
+                workspaceInfo: info,
+                pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")
+            ),
+            dispatcher: NoopDispatcher(),
+            queryRunner: queryRunner,
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-read-citation-retry", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.sendQuery("what does foo say?")
+
+        await waitUntil {
+            model.querySession.status == .completed && queryRunner.capturedPrompts.count == 2
+        }
+
+        XCTAssertEqual(queryRunner.capturedPrompts[0], "what does foo say?")
+        XCTAssertTrue(queryRunner.capturedPrompts[1].contains("[[Foo Source]]"))
+        XCTAssertEqual(queryRunner.capturedResumeSessionIDs[1], "read-session")
+        XCTAssertEqual(model.querySession.assistantText, "Foo says the project needs citations ([[Foo Source]]).")
+        XCTAssertEqual(model.querySession.claudeSessionID, "read-citation-session")
+    }
+
+    func testWikiPageReadWithInlineCitationDoesNotTriggerCitationRetry() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-citation-ok", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        let info = WorkspaceInfo(
+            path: workspaceURL.path,
+            topic: "Rhizome",
+            description: "Test workspace",
+            rawFiles: 0,
+            processed: 0,
+            unprocessed: 0,
+            needsDocumentReview: 0,
+            wikiPageCount: 1
+        )
+        let queryRunner = ScriptedQueryRunner(
+            scripts: [
+                [
+                    .toolCall(
+                        name: "Bash",
+                        input: ["command": "compile obsidian page \"Planner\""]
+                    ),
+                    .toolResult(preview: "Page content"),
+                    .finished(
+                        text: "Per [[Planner]], the project ships next week.",
+                        costUSD: nil,
+                        durationMs: nil,
+                        permissionDenials: [],
+                        sessionID: "single-session"
+                    ),
+                ],
+            ]
+        )
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let model = AppModel(
+            runner: FakeCompileRunner(
+                workspaceInfo: info,
+                pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")
+            ),
+            dispatcher: NoopDispatcher(),
+            queryRunner: queryRunner,
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-citation-ok", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.sendQuery("when does the project ship?")
+
+        await waitUntil {
+            model.querySession.status == .completed && queryRunner.capturedPrompts.count == 1
+        }
+
+        XCTAssertEqual(queryRunner.capturedPrompts, ["when does the project ship?"])
+        XCTAssertEqual(model.querySession.assistantText, "Per [[Planner]], the project ships next week.")
+    }
+
+    func testAnswerWithoutWikiPageReadsDoesNotTriggerCitationRetry() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-citation-skip", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        let info = WorkspaceInfo(
+            path: workspaceURL.path,
+            topic: "Rhizome",
+            description: "Test workspace",
+            rawFiles: 0,
+            processed: 0,
+            unprocessed: 0,
+            needsDocumentReview: 0,
+            wikiPageCount: 1
+        )
+        let queryRunner = ScriptedQueryRunner(
+            scripts: [
+                [
+                    .toolCall(
+                        name: "Bash",
+                        input: ["command": "compile obsidian search \"tcp\""]
+                    ),
+                    .toolResult(preview: "no matches"),
+                    .finished(
+                        text: "TCP is a transport protocol that provides reliable, ordered delivery — this is general knowledge, not in the wiki.",
+                        costUSD: nil,
+                        durationMs: nil,
+                        permissionDenials: [],
+                        sessionID: "general-session"
+                    ),
+                ],
+            ]
+        )
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let model = AppModel(
+            runner: FakeCompileRunner(
+                workspaceInfo: info,
+                pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")
+            ),
+            dispatcher: NoopDispatcher(),
+            queryRunner: queryRunner,
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-citation-skip", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.sendQuery("what is tcp?")
+
+        await waitUntil {
+            model.querySession.status == .completed && queryRunner.capturedPrompts.count == 1
+        }
+
+        XCTAssertEqual(queryRunner.capturedPrompts, ["what is tcp?"])
+        XCTAssertTrue(model.querySession.assistantText.contains("TCP is a transport protocol"))
+    }
+
+    func testExtractWikiPagesReadParsesCompileObsidianPageInvocations() {
+        let titles = AppModel.extractWikiPagesRead(
+            name: "Bash",
+            input: [
+                "command": #"compile obsidian page "Land of Open Graves — Ch. 1 (DeLeon 2015)" && uv run compile obsidian page Planner"#
+            ],
+            workspaceURL: tempDirectory
+        )
+        XCTAssertEqual(titles, [
+            "Land of Open Graves — Ch. 1 (DeLeon 2015)",
+            "Planner",
+        ])
+    }
+
+    func testExtractWikiPagesReadIgnoresUnrelatedBashCommands() {
+        XCTAssertTrue(AppModel.extractWikiPagesRead(
+            name: "Bash",
+            input: ["command": "compile obsidian search 'foo'"],
+            workspaceURL: tempDirectory
+        ).isEmpty)
+        XCTAssertTrue(AppModel.extractWikiPagesRead(
+            name: "Bash",
+            input: ["command": "rg -n 'pattern' wiki/"],
+            workspaceURL: tempDirectory
+        ).isEmpty)
+        XCTAssertTrue(AppModel.extractWikiPagesRead(
+            name: "Read",
+            input: ["file_path": tempDirectory.appending(path: "raw/planner.md").path],
+            workspaceURL: tempDirectory
+        ).isEmpty)
+        XCTAssertTrue(AppModel.extractWikiPagesRead(
+            name: "Read",
+            input: ["file_path": tempDirectory.appending(path: "wiki/articles/planner.txt").path],
+            workspaceURL: tempDirectory
+        ).isEmpty)
     }
 
     func testFollowUpUsesClaudeSessionInsteadOfSerializedHistory() async throws {
@@ -1148,7 +1459,7 @@ final class AppModelTests: XCTestCase {
                     ),
                 ],
                 [
-                    .toolCall(name: "Task"),
+                    .toolCall(name: "Task", input: [:]),
                     .finished(
                         text: "follow-up researched",
                         costUSD: nil,

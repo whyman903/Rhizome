@@ -85,7 +85,7 @@ final class ClaudeQueryRunnerTests: XCTestCase {
             case .assistantText(let text):
                 if text == "looking up" { sawAssistantLookingUp = true }
                 if text.contains("Found [[Foo]]") { sawAssistantFinalText = true }
-            case .toolCall(let name):
+            case .toolCall(let name, _):
                 if name == "Grep" { sawToolCall = true }
             case .toolResult(let preview):
                 if preview.contains("match: foo bar") { sawToolResult = true }
@@ -359,7 +359,7 @@ final class ClaudeQueryRunnerTests: XCTestCase {
 
         let events = collector.snapshot()
         let toolCalls = events.compactMap { event -> String? in
-            if case .toolCall(let name) = event { return name } else { return nil }
+            if case .toolCall(let name, _) = event { return name } else { return nil }
         }
         XCTAssertEqual(toolCalls, ["Bash"])
         let finishedText = events.compactMap { event -> String? in
@@ -450,6 +450,7 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         #!/bin/zsh
         if [[ "$1" == "--help" ]]; then
           echo '--exclude-dynamic-system-prompt-sections'
+          echo '--tools <tools...>'
           exit 0
         fi
         printf '%s\\n' "$@" > args.txt
@@ -482,6 +483,10 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         XCTAssertEqual(
             Array(args.drop(while: { $0 != "--allowedTools" }).prefix(2)),
             ["--allowedTools", "Read,Grep,Glob,LS,Bash,Task,WebSearch,WebFetch"]
+        )
+        XCTAssertEqual(
+            Array(args.drop(while: { $0 != "--tools" }).prefix(2)),
+            ["--tools", "Read,Grep,Glob,LS,Bash,Task,WebSearch,WebFetch"]
         )
         XCTAssertTrue(args.contains("--exclude-dynamic-system-prompt-sections"))
         XCTAssertEqual(

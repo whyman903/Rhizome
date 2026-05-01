@@ -8,7 +8,7 @@ final class QuerySessionTests: XCTestCase {
         let session = QuerySession()
         session.start(question: "first")
         session.handle(.assistantText("partial"))
-        session.handle(.toolCall(name: "Read"))
+        session.handle(.toolCall(name: "Read", input: [:]))
         session.start(question: "second")
 
         XCTAssertEqual(session.question, "second")

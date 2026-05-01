@@ -414,7 +414,7 @@ public final class AppModel {
         switch event {
         case .assistantText(let text):
             logger.log("\(prefix): got assistantText (\(text.count) chars)")
-        case .toolCall(let name):
+        case .toolCall(let name, _):
             logger.log("\(prefix): got toolCall — \(name)")
         case .toolResult(let preview):
             logger.log("\(prefix): got toolResult (\(preview.count) chars)")
@@ -572,6 +572,109 @@ public final class AppModel {
         }
     }
 
+    /// Holds back the final assistant text and `finished` event so the citation
+    /// guard can validate the answer before it reaches the user. Tool calls and
+    /// tool results are forwarded live so research progress stays visible.
+    private actor CitationGuardBuffer {
+        struct Summary: Sendable {
+            let wikiPages: [String]
+            let finalText: String?
+            let lastSessionID: String?
+        }
+
+        private let downstream: @Sendable (ClaudeQueryEvent) async -> Void
+        private let workspaceURL: URL
+        private var wikiPagesUsed: [String] = []
+        private var seenWikiPages: Set<String> = []
+        private var pendingAssistantText: ClaudeQueryEvent?
+        private var pendingFinished: ClaudeQueryEvent?
+        private var finalAnswerText: String?
+        private var lastSessionID: String?
+
+        init(
+            workspaceURL: URL,
+            downstream: @escaping @Sendable (ClaudeQueryEvent) async -> Void
+        ) {
+            self.workspaceURL = workspaceURL
+            self.downstream = downstream
+        }
+
+        func handle(_ event: ClaudeQueryEvent) async {
+            switch event {
+            case .toolCall(let name, let input):
+                for page in AppModel.extractWikiPagesRead(
+                    name: name,
+                    input: input,
+                    workspaceURL: workspaceURL
+                ) {
+                    if seenWikiPages.insert(page).inserted {
+                        wikiPagesUsed.append(page)
+                    }
+                }
+                if let held = pendingAssistantText {
+                    await downstream(held)
+                    pendingAssistantText = nil
+                }
+                pendingFinished = nil
+                finalAnswerText = nil
+                await downstream(event)
+            case .toolResult:
+                if let held = pendingAssistantText {
+                    await downstream(held)
+                    pendingAssistantText = nil
+                }
+                await downstream(event)
+            case .assistantText:
+                if let held = pendingAssistantText {
+                    await downstream(held)
+                }
+                pendingAssistantText = event
+            case .finished(let text, _, _, _, let sessionID):
+                pendingFinished = event
+                finalAnswerText = text
+                if let sessionID, !sessionID.isEmpty {
+                    lastSessionID = sessionID
+                }
+            case .failed:
+                if let held = pendingAssistantText {
+                    await downstream(held)
+                    pendingAssistantText = nil
+                }
+                if let held = pendingFinished {
+                    await downstream(held)
+                    pendingFinished = nil
+                }
+                finalAnswerText = nil
+                await downstream(event)
+            }
+        }
+
+        func summarize() -> Summary {
+            Summary(
+                wikiPages: wikiPagesUsed,
+                finalText: finalAnswerText,
+                lastSessionID: lastSessionID
+            )
+        }
+
+        func flushFinalEvents() async {
+            if let held = pendingAssistantText {
+                await downstream(held)
+                pendingAssistantText = nil
+            }
+            if let held = pendingFinished {
+                await downstream(held)
+                pendingFinished = nil
+            }
+        }
+
+        func discardFinalEvents() {
+            pendingAssistantText = nil
+            pendingFinished = nil
+            finalAnswerText = nil
+        }
+    }
+
     private static func runQueryWithResearchGuard(
         prompt: String,
         workspaceURL: URL,
@@ -584,13 +687,18 @@ public final class AppModel {
         onRetry: @escaping @Sendable (String) async -> Void,
         onEvent: @escaping @Sendable (ClaudeQueryEvent) async -> Void
     ) async throws {
+        let citationBuffer = CitationGuardBuffer(workspaceURL: workspaceURL, downstream: onEvent)
+        let bufferedOnEvent: @Sendable (ClaudeQueryEvent) async -> Void = { event in
+            await citationBuffer.handle(event)
+        }
+
         let firstAttempt = try await runBufferedQueryAttempt(
             prompt: prompt,
             workspaceURL: workspaceURL,
             resumeSessionID: resumeSessionID,
             runner: runner,
             discardFinishedWithoutResearch: true,
-            onEvent: onEvent
+            onEvent: bufferedOnEvent
         )
         if firstAttempt.finishedWithoutResearch {
             logger.log("\(logPrefix): Claude answered without research tools; retrying once")
@@ -602,9 +710,12 @@ public final class AppModel {
                 resumeSessionID: retryResumeSessionID,
                 runner: runner,
                 discardFinishedWithoutResearch: false,
-                onEvent: onEvent
+                onEvent: bufferedOnEvent
             )
-            guard retryAttempt.finishedWithoutResearch == false else { return }
+            guard retryAttempt.finishedWithoutResearch == false else {
+                await citationBuffer.flushFinalEvents()
+                return
+            }
             if let message = retryAttempt.retryableIncompleteAnswerFailureMessage {
                 logger.log("\(logPrefix): Claude exited after research without an answer; retrying final answer once — \(message.prefix(160))")
                 await onRetry("Retrying after interrupted tool output…")
@@ -612,9 +723,19 @@ public final class AppModel {
                     prompt: Self.finalAnswerRequiredRetryPrompt(for: retryPromptText),
                     workspaceURL: workspaceURL,
                     resumeSessionID: nil,
-                    onEvent: onEvent
+                    onEvent: bufferedOnEvent
                 )
             }
+            try await runCitationGuardIfNeeded(
+                originalQuestion: prompt,
+                citationBuffer: citationBuffer,
+                runner: runner,
+                workspaceURL: workspaceURL,
+                logger: logger,
+                logPrefix: logPrefix,
+                onRetry: onRetry,
+                onEvent: onEvent
+            )
             return
         }
 
@@ -625,9 +746,56 @@ public final class AppModel {
                 prompt: Self.finalAnswerRequiredRetryPrompt(for: prompt),
                 workspaceURL: workspaceURL,
                 resumeSessionID: nil,
-                onEvent: onEvent
+                onEvent: bufferedOnEvent
             )
         }
+
+        try await runCitationGuardIfNeeded(
+            originalQuestion: prompt,
+            citationBuffer: citationBuffer,
+            runner: runner,
+            workspaceURL: workspaceURL,
+            logger: logger,
+            logPrefix: logPrefix,
+            onRetry: onRetry,
+            onEvent: onEvent
+        )
+    }
+
+    private static func runCitationGuardIfNeeded(
+        originalQuestion: String,
+        citationBuffer: CitationGuardBuffer,
+        runner: ClaudeQueryRunning,
+        workspaceURL: URL,
+        logger: AppLogger,
+        logPrefix: String,
+        onRetry: @escaping @Sendable (String) async -> Void,
+        onEvent: @escaping @Sendable (ClaudeQueryEvent) async -> Void
+    ) async throws {
+        let summary = await citationBuffer.summarize()
+        guard
+            let finalText = summary.finalText,
+            !finalText.isEmpty,
+            !summary.wikiPages.isEmpty,
+            !answerHasWikilink(finalText)
+        else {
+            await citationBuffer.flushFinalEvents()
+            return
+        }
+
+        logger.log("\(logPrefix): final answer read \(summary.wikiPages.count) wiki page(s) but cited 0 — retrying with citation requirement")
+        await onRetry("Retrying for wiki citations…")
+        await citationBuffer.discardFinalEvents()
+        let citationPrompt = citationRequiredRetryPrompt(
+            for: originalQuestion,
+            wikiPages: summary.wikiPages
+        )
+        try await runner.runQuery(
+            prompt: citationPrompt,
+            workspaceURL: workspaceURL,
+            resumeSessionID: summary.lastSessionID,
+            onEvent: onEvent
+        )
     }
 
     private static func runBufferedQueryAttempt(
@@ -659,7 +827,7 @@ public final class AppModel {
     }
 
     nonisolated private static func isResearchToolCall(_ event: ClaudeQueryEvent) -> Bool {
-        guard case .toolCall(let name) = event else { return false }
+        guard case .toolCall(let name, _) = event else { return false }
         return researchToolNames.contains(name)
     }
 
@@ -676,6 +844,108 @@ public final class AppModel {
 
         Request:
         \(prompt)
+        """
+    }
+
+    nonisolated static func extractWikiPagesRead(
+        name: String,
+        input: [String: String],
+        workspaceURL: URL
+    ) -> [String] {
+        switch name {
+        case "Bash":
+            guard let command = input["command"], !command.isEmpty else { return [] }
+            return extractWikiPageTitlesFromBashCommand(command)
+        case "Read":
+            guard let filePath = input["file_path"], !filePath.isEmpty,
+                  let title = extractWikiPageTitleFromReadPath(filePath, workspaceURL: workspaceURL) else {
+                return []
+            }
+            return [title]
+        default:
+            return []
+        }
+    }
+
+    /// Pull page titles out of `compile obsidian page <title>` invocations.
+    /// Recognizes optional `uv run ` prefix and either quoted or bare arguments.
+    nonisolated private static func extractWikiPageTitlesFromBashCommand(_ command: String) -> [String] {
+        let pattern = #"(?:^|[\s;|&(`])(?:uv\s+run\s+)?compile\s+obsidian\s+page\s+("[^"]*"|'[^']*'|[^\s;|&)`]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let nsCommand = command as NSString
+        let matches = regex.matches(
+            in: command,
+            options: [],
+            range: NSRange(location: 0, length: nsCommand.length)
+        )
+        var titles: [String] = []
+        for match in matches {
+            guard match.numberOfRanges >= 2 else { continue }
+            let argRange = match.range(at: 1)
+            guard argRange.location != NSNotFound else { continue }
+            var arg = nsCommand.substring(with: argRange)
+            if (arg.hasPrefix("\"") && arg.hasSuffix("\"") && arg.count >= 2)
+                || (arg.hasPrefix("'") && arg.hasSuffix("'") && arg.count >= 2) {
+                arg = String(arg.dropFirst().dropLast())
+            }
+            let trimmed = arg.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                titles.append(trimmed)
+            }
+        }
+        return titles
+    }
+
+    nonisolated private static func extractWikiPageTitleFromReadPath(
+        _ filePath: String,
+        workspaceURL: URL
+    ) -> String? {
+        let candidateURL: URL
+        if filePath.hasPrefix("/") {
+            candidateURL = URL(fileURLWithPath: filePath)
+        } else {
+            candidateURL = workspaceURL.appending(path: filePath)
+        }
+
+        let normalizedPath = candidateURL.standardizedFileURL.path
+        let wikiRootPath = workspaceURL
+            .appending(path: "wiki", directoryHint: .isDirectory)
+            .standardizedFileURL
+            .path
+        let wikiPrefix = wikiRootPath.hasSuffix("/") ? wikiRootPath : wikiRootPath + "/"
+        guard normalizedPath.hasPrefix(wikiPrefix),
+              normalizedPath.hasSuffix(".md") else {
+            return nil
+        }
+
+        let title = URL(fileURLWithPath: normalizedPath)
+            .deletingPathExtension()
+            .lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
+    }
+
+    nonisolated private static func answerHasWikilink(_ text: String) -> Bool {
+        for run in WikilinkParser.parse(text) {
+            if case .link = run { return true }
+        }
+        return false
+    }
+
+    nonisolated private static func citationRequiredRetryPrompt(
+        for question: String,
+        wikiPages: [String]
+    ) -> String {
+        let cited = wikiPages.map { "[[\($0)]]" }.joined(separator: ", ")
+        return """
+        Your previous answer was discarded because it summarized wiki pages but did not include any [[Page Title]] wikilink citations. Retry the question below.
+
+        You read these wiki pages: \(cited).
+
+        Produce the final answer to the original question with inline [[Page Title]] citations for every wiki-backed claim. Cite only pages you actually read. If a paragraph is from general knowledge or the web rather than the wiki, label it as such instead of inventing a wikilink.
+
+        Original question:
+        \(question)
         """
     }
 

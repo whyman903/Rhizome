@@ -108,7 +108,7 @@ public final class QuerySession: Identifiable {
         switch event {
         case .assistantText(let text):
             self.assistantText = text
-        case .toolCall(let name):
+        case .toolCall(let name, _):
             self.toolCalls.append(name)
             switch name {
             case "Grep": self.statusDetail = "Searching the wiki…"
