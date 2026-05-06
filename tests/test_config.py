@@ -27,11 +27,11 @@ class TestConfig:
 
 class TestSaveAndLoadConfig:
     def test_round_trip(self, tmp_path: Path) -> None:
-        config = Config(topic="My Wiki", description="A test wiki", workspace_root=tmp_path)
+        config = Config(topic="Rhizome", description="A test wiki", workspace_root=tmp_path)
         save_config(config)
 
         loaded = load_config(tmp_path)
-        assert loaded.topic == "My Wiki"
+        assert loaded.topic == "Rhizome"
         assert loaded.description == "A test wiki"
         assert loaded.workspace_root == tmp_path
 

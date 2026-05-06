@@ -7,13 +7,13 @@ Work through three phases. The structural audit is mechanical. The editorial aud
 1. Run `compile health --json-output` and read the full report. Note every issue, and note the editorial metrics (`source_to_knowledge_page_ratio`, `knowledge_page_count`, `source_notes_without_topic_anchors`). "Knowledge page" covers any synthesis page type (`article`, `concept`, `entity`, etc.), not just those with `type: article`.
 2. Run `compile obsidian inspect` for graph-level problems: orphans, thin pages, unresolved links, stale navigation.
 3. Run `compile suggest maps` when source notes appear disconnected from the main article/map layer.
-4. For each structural issue found, fix it:
-   - **Unresolved links**: read the page with `compile obsidian page`, either create the missing target or fix the link.
-   - **Orphan pages**: add links from related pages, or merge into a parent page if the orphan is too thin to stand alone.
-   - **Thin pages**: read them, either expand with real content or merge into a related article.
+4. For each structural issue found, fix it. **Default to the `Edit` tool** for narrow repairs on an existing page (fixing a link, adding a wikilink, tightening a summary line, appending a citation, inserting a callout). Reserve `compile obsidian upsert` for status/tag changes (`--status`, `--tag`), creating a missing target page, or a deliberate whole-body rewrite.
+   - **Unresolved links**: read the page with `compile obsidian page`, then use `Edit` to fix the link text, or create the missing target if appropriate.
+   - **Orphan pages**: use `Edit` on related pages to add incoming links, or merge the orphan into a parent page if it is too thin to stand alone.
+   - **Thin pages**: read them, then either use `Edit` to expand in place with real content or merge into a related article.
    - **Stale navigation**: run `compile obsidian refresh`.
-   - **Malformed summaries**: read the page and rewrite the summary.
-   - **Source notes without article/map anchors**: link them from an existing article or map, or create a lightweight map page if the broad topic clearly lacks a hub. If the problem is systemic — many unanchored sources sharing a theme — run `/synthesize` instead of wiring them one at a time.
+   - **Malformed summaries**: read the page and use `Edit` to fix the `summary:` frontmatter line or the opening summary paragraph.
+   - **Source notes without article/map anchors**: use `Edit` on an existing article or map to add a `[[wikilink]]` to the source, or create a lightweight map page if the broad topic clearly lacks a hub. If the problem is systemic — many unanchored sources sharing a theme — run `/synthesize` instead of wiring them one at a time.
 
 ### Phase 2 — Editorial audit
 

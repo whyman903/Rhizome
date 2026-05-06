@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -39,7 +40,6 @@ def test_fresh_install(tmp_path: Path) -> None:
         content = (home / ".claude" / "commands" / name).read_text()
         assert str(ws) in content
         assert "{{wiki_path}}" not in content
-        assert "wiki-enrich" not in content
 
     query = (home / ".claude" / "commands" / "query.md").read_text()
     assert "markdown is the fallback" not in query
@@ -47,15 +47,27 @@ def test_fresh_install(tmp_path: Path) -> None:
     assert f'cd "{ws}" && compile ...' in query
     assert "--nodes-file" in query
     assert "--script-file" in query
-    assert "Want me to save this as a wiki output page?" in query
-    assert "Only save it if the user says yes" in query
+    assert "Brief/casual lookup or callback" in query
+    assert "Explicit artifact request" in query
+    assert "create the artifact immediately" in query
+    assert "Do not ask whether to save it again" in query
+    assert "Do not use a generic save offer" in query
+    assert "Want me to save this as a wiki output page?" not in query
+    assert "Only save it if the user says yes" not in query
+    assert "fill any gaps from web-backed or general knowledge" in query
+    assert "Do not refuse just because the topic is outside the wiki" in query
+    assert "Do not mention your knowledge cutoff" in query
+    assert "direct `rg`/file search across `wiki/` and `raw/`" in query
+    assert "inventory, count, list-all, and duplicate queries" in query
+    assert "quote, verbatim, or \"in their own words\"" in query
+    assert "which sources support which moves" in query
+    assert "WebSearch`/`WebFetch" in query
+    assert "LaTeX math notation, not Unicode math symbols" in query
 
     context = (home / ".claude" / "commands" / "context.md").read_text()
     assert "First try the current working directory" in context
     assert f'cd "{ws}" && compile ...' in context
 
-    assert not (home / ".claude" / "commands" / "wiki-query.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-context.md").exists()
     assert not (ws / ".claude" / "commands" / "query.md").exists()
     assert not (ws / ".claude" / "commands" / "context.md").exists()
 
@@ -69,13 +81,65 @@ def test_fresh_install(tmp_path: Path) -> None:
     assert "## Enrich Workflow" not in workspace_claude
     assert "<!-- compile:figures:start -->" not in workspace_claude
     assert "create them when the user asks for them or explicitly agrees" in workspace_claude.lower()
+    assert "not a hard boundary on what you can answer" in workspace_claude
+    assert "answer from web-backed or general knowledge anyway" in workspace_claude
+    assert "knowledge-cutoff disclaimers" in workspace_claude
     assert (ws / ".claude" / "settings.local.json").exists()
     settings_content = (ws / ".claude" / "settings.local.json").read_text()
     assert '"mcp__notion"' in settings_content
     assert '"Edit(raw/notion/**)"' in settings_content
     assert '"Bash(compile health)"' in settings_content
+    assert '"Bash(compile status*)"' not in settings_content
+    assert '"Bash(compile health*)"' not in settings_content
+    assert ".compile/rhizome-bin/compile status --path . --json-output" in settings_content
     for name in workspace_templates:
         assert (ws / ".claude" / "commands" / name).exists()
+
+
+def test_setup_backfills_existing_pdf_fulltext_callouts(tmp_path: Path) -> None:
+    ws = _make_workspace(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    raw_sha = "a" * 64
+    extract_dir = ws / ".compile" / "extract"
+    extract_dir.mkdir(parents=True)
+    (extract_dir / f"{raw_sha}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "raw_path": "raw/paper.pdf",
+                "raw_sha256": raw_sha,
+                "media_type": "application/pdf",
+                "extractor_name": "pymupdf_text",
+                "extractor_version": "1.27.2.2",
+                "extracted_at": "2026-01-01T00:00:00+00:00",
+                "extraction_mode": "text",
+                "requires_document_review": True,
+                "warnings": [],
+                "pages": [{"page_number": 1, "text": "Backfilled full text."}],
+            }
+        )
+    )
+    source_path = ws / "wiki" / "sources" / "Paper.md"
+    source_path.write_text(
+        "---\n"
+        "title: Paper\n"
+        "type: source\n"
+        "sources:\n"
+        "- raw/paper.pdf\n"
+        "---\n\n"
+        "# Paper\n\n"
+        "## Provenance\n\n"
+        "- Source file: ![[raw/paper.pdf]]\n"
+    )
+
+    install_claude_files(ws, home, force=False)
+
+    content = source_path.read_text()
+    assert "> [!abstract]- Full extracted text" in content
+    assert "> Backfilled full text." in content
+    assert not (ws / "extracted" / f"{raw_sha}.txt").exists()
 
 
 def test_skip_existing_without_force(tmp_path: Path) -> None:
@@ -141,7 +205,7 @@ def test_force_merges_existing_settings_local_json(tmp_path: Path) -> None:
     assert '"Bash(custom command)"' in merged
     assert '"mcp__notion"' in merged
     assert '"matcher": "custom"' in merged
-    assert "No wiki index found." in merged
+    assert ".compile/rhizome-bin/compile status --path . --json-output" in merged
 
 
 def test_mispointed_globals_detected(tmp_path: Path) -> None:
@@ -187,7 +251,7 @@ def test_mispointed_globals_fixed_with_force(tmp_path: Path) -> None:
 
 
 def test_path_with_spaces_quoted_in_shell_commands(tmp_path: Path) -> None:
-    ws = _make_workspace(tmp_path, "My Wiki")
+    ws = _make_workspace(tmp_path, "Rhizome")
     home = tmp_path / "home"
     home.mkdir()
 
@@ -199,23 +263,6 @@ def test_path_with_spaces_quoted_in_shell_commands(tmp_path: Path) -> None:
         for line in content.splitlines():
             if line.strip().startswith(("cd ", "`cd ")):
                 assert f'cd "{ws}"' in line, f"Unquoted path in shell command: {line}"
-
-
-def test_no_obsolete_templates_installed(tmp_path: Path) -> None:
-    ws = _make_workspace(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-
-    install_claude_files(ws, home, force=False)
-
-    assert not (home / ".claude" / "commands" / "wiki-visualize.md").exists()
-    assert not (ws / ".claude" / "commands" / "visualize.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-enrich.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-query.md").exists()
-    assert not (home / ".claude" / "commands" / "wiki-context.md").exists()
-    assert not (ws / ".claude" / "commands" / "enrich.md").exists()
-    assert not (ws / ".claude" / "commands" / "query.md").exists()
-    assert not (ws / ".claude" / "commands" / "context.md").exists()
 
 
 def test_ingest_template_matches_simplified_workflow(tmp_path: Path) -> None:
@@ -299,13 +346,17 @@ def test_synthesize_command_is_installed(tmp_path: Path) -> None:
     assert "source-to-article ratio" not in content
 
 
-def test_global_query_template_hides_upsert_behind_output_save_intent(tmp_path: Path) -> None:
+def test_global_query_template_uses_conditional_persistence_targets(tmp_path: Path) -> None:
     ws = _make_workspace(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     install_claude_files(ws, home, force=False)
     query_content = (home / ".claude" / "commands" / "query.md").read_text()
-    assert "save it as an `output` page using the low-level page writer" in query_content
+    assert "Do not use a generic save offer" in query_content
+    assert "fold the answer into `[[Existing Article]]`" in query_content
+    assert "apply the targeted fixes or delete/redirect the duplicate" in query_content
+    assert "save it as a new `output` page" in query_content
+    assert "Brief/casual/absence/simple lookup → no save offer" in query_content
 
 
 def test_install_covers_all_current_template_files(tmp_path: Path) -> None:
@@ -322,6 +373,28 @@ def test_install_covers_all_current_template_files(tmp_path: Path) -> None:
 
     assert installed_globals == _template_names("global")
     assert installed_workspace_commands == _template_names("workspace", "commands")
+
+
+def test_templates_prefer_targeted_edits_over_rewrites(tmp_path: Path) -> None:
+    ws = _make_workspace(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    install_claude_files(ws, home, force=False)
+
+    claude_md = (ws / "CLAUDE.md").read_text()
+    assert "Prefer targeted edits over rewrites" in claude_md
+    assert "`Edit` tool" in claude_md
+
+    ingest = (ws / ".claude" / "commands" / "ingest.md").read_text()
+    assert "Use the `Edit` tool" in ingest
+    assert "Do not rewrite the whole anchor body" in ingest
+
+    synthesize = (ws / ".claude" / "commands" / "synthesize.md").read_text()
+    assert "use the `Edit` tool" in synthesize
+    assert "Do not regenerate the whole article body" in synthesize
+
+    lint = (ws / ".claude" / "commands" / "lint.md").read_text()
+    assert "Default to the `Edit` tool" in lint
 
 
 def test_invalid_workspace_errors(tmp_path: Path) -> None:
@@ -344,5 +417,3 @@ def test_cli_reports_mispointed(tmp_path: Path, monkeypatch: object) -> None:
 
     assert "point at a different wiki" in result.output
     assert "--force" in result.output
-
-

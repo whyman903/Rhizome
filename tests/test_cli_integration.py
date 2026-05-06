@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -37,7 +40,7 @@ def _write_pdf(path: Path, *, text: str = "") -> None:
 class TestInitCommand:
     def test_basic_init(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "My Wiki", "-p", str(tmp_path / "new")])
+        result = runner.invoke(main, ["init", "Rhizome", "-p", str(tmp_path / "new")])
         assert result.exit_code == 0
         assert "initialized" in result.output.lower()
         assert (tmp_path / "new" / "wiki").is_dir()
@@ -45,7 +48,7 @@ class TestInitCommand:
     def test_init_with_description(self, tmp_path: Path) -> None:
         runner = CliRunner()
         result = runner.invoke(main, [
-            "init", "My Wiki", "-d", "A personal knowledge base", "-p", str(tmp_path / "new"),
+            "init", "Rhizome", "-d", "A personal knowledge base", "-p", str(tmp_path / "new"),
         ])
         assert result.exit_code == 0
 
@@ -80,19 +83,19 @@ class TestStatusCommand:
 class TestMachineReadableCommands:
     def test_init_json_success(self, tmp_path: Path) -> None:
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "My Wiki", "--path", str(tmp_path), "--json-output"])
+        result = runner.invoke(main, ["init", "Rhizome", "--path", str(tmp_path), "--json-output"])
 
         assert result.exit_code == 0
         payload = json.loads(result.output)
         assert payload["ok"] is True
-        assert payload["workspace"]["topic"] == "My Wiki"
+        assert payload["workspace"]["topic"] == "Rhizome"
         assert payload["workspace"]["path"] == str(tmp_path)
 
     def test_init_json_failure(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Existing")
         runner = CliRunner()
 
-        result = runner.invoke(main, ["init", "My Wiki", "--path", str(tmp_path), "--json-output"])
+        result = runner.invoke(main, ["init", "Rhizome", "--path", str(tmp_path), "--json-output"])
 
         assert result.exit_code != 0
         payload = json.loads(result.output)
@@ -537,17 +540,58 @@ class TestIngestCommand:
         assert "extraction_method: pymupdf_text" in source_text
         assert "## Review Status" in source_text
 
-        sidecar = tmp_path / ".compile" / "extract" / f"{compute_sha256(pdf_file)}.json"
+        raw_sha = compute_sha256(pdf_file)
+        sidecar = tmp_path / ".compile" / "extract" / f"{raw_sha}.json"
         assert sidecar.exists()
         payload = json.loads(sidecar.read_text())
         assert payload["schema_version"] == 1
         assert payload["raw_path"] == "raw/paper.pdf"
-        assert payload["raw_sha256"] == compute_sha256(pdf_file)
+        assert payload["raw_sha256"] == raw_sha
         assert payload["extractor_name"] == "pymupdf_text"
         assert payload["requires_document_review"] is True
         assert "chunks" not in payload
         assert payload["pages"][0]["page_number"] == 1
         assert "This PDF has enough source text" in payload["pages"][0]["text"]
+
+        assert "> [!abstract]- Full extracted text" in source_text
+        assert "> This PDF has enough source text" in source_text
+
+        connection = sqlite3.connect(tmp_path / ".compile" / "index" / "search.db")
+        try:
+            chunk_texts = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT chunk_text FROM chunks WHERE raw_sha256 = ?",
+                    (raw_sha,),
+                ).fetchall()
+            ]
+        finally:
+            connection.close()
+        assert any("This PDF has enough source text" in chunk for chunk in chunk_texts)
+        for chunk in chunk_texts:
+            assert chunk in " ".join(source_text.split())
+
+        if shutil.which("rg") is None:
+            pytest.skip("rg is required to verify broad grep visibility")
+        rg = subprocess.run(
+            ["rg", "This PDF has enough source text", str(tmp_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert rg.returncode == 0
+        assert "wiki/sources/Paper.md" in rg.stdout
+
+        inspect = runner.invoke(main, ["obsidian", "inspect", "--path", str(tmp_path), "--json-output"])
+        assert inspect.exit_code == 0
+        report = json.loads(inspect.output)
+        assert report["raw_file_count"] == 1
+        source_page = next(
+            page for page in report["pages"]
+            if page["relative_path"] == "wiki/sources/Paper.md"
+        )
+        assert source_page["resolved_file_links"] == ["raw/paper.pdf"]
+        assert source_page["unresolved_outbound_links"] == []
 
     def test_reingest_unchanged_pdf_reuses_existing_sidecar(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
@@ -571,6 +615,37 @@ class TestIngestCommand:
         assert reloaded["extracted_at"] == "sentinel"
         assert (tmp_path / "wiki" / "sources" / "Paper.md").exists()
 
+    def test_preserved_pdf_source_note_gets_extracted_text_callout(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        pdf_file = tmp_path / "raw" / "paper.pdf"
+        _write_pdf(pdf_file, text="Preserved note full text should be discoverable.")
+        source_path = tmp_path / "wiki" / "sources" / "Paper.md"
+        source_path.write_text(
+            "---\n"
+            "title: Paper\n"
+            "type: source\n"
+            "status: stable\n"
+            "summary: Existing enriched PDF note.\n"
+            "sources:\n"
+            "- raw/paper.pdf\n"
+            "---\n\n"
+            "# Paper\n\n"
+            "## Synopsis\n\n"
+            "Existing enriched PDF content should remain intact.\n\n"
+            "## Provenance\n\n"
+            "- Source file: ![[raw/paper.pdf]]\n"
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["ingest", "paper.pdf", "--path", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Source already enriched" in result.output
+        updated = source_path.read_text()
+        assert "Existing enriched PDF content should remain intact." in updated
+        assert "> [!abstract]- Full extracted text" in updated
+        assert "> Preserved note full text should be discoverable." in updated
+
     def test_reingest_unreviewed_extracted_pdf_refreshes_source_note_when_raw_changes(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
         pdf_file = tmp_path / "raw" / "paper.pdf"
@@ -588,7 +663,7 @@ class TestIngestCommand:
         assert "Updated extracted PDF text." in source_text
         assert "Original extracted PDF text." not in source_text
 
-    def test_reingest_enriched_pdf_with_historical_managed_block_preserves_note_unchanged(self, tmp_path: Path) -> None:
+    def test_reingest_enriched_pdf_with_historical_managed_block_preserves_content(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
         pdf_file = tmp_path / "raw" / "paper.pdf"
         _write_pdf(
@@ -623,7 +698,14 @@ class TestIngestCommand:
 
         assert result.exit_code == 0
         assert "Source already enriched" in result.output
-        assert source_path.read_text() == original
+        updated = source_path.read_text()
+        assert "Existing enriched content." in updated
+        assert "<!-- compile:figures:start -->" in updated
+        assert "### Legacy Figure" in updated
+        assert "![[raw/assets/paper-legacy/page-001-figure-01.png]]" in updated
+        assert "<!-- compile:figures:end -->" in updated
+        assert "> [!abstract]- Full extracted text" in updated
+        assert "> This PDF has enough source text to extract." in updated
 
     def test_ingest_non_raw_file_rejected(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
@@ -1226,6 +1308,32 @@ class TestObsidianSearchCommand:
 
         assert result.exit_code == 0
         assert "Unique Article" in result.output
+
+    def test_search_downranks_generated_navigation_pages(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        _write_page(
+            tmp_path / "wiki" / "articles" / "evidence.md",
+            "Evidence Page",
+            "article",
+            "needle pattern evidence lives here.",
+        )
+        _write_page(
+            tmp_path / "wiki" / "index.md",
+            "Index",
+            "index",
+            "needle pattern appears here only because this is a generated catalog.",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["obsidian", "search", "needle pattern", "--path", str(tmp_path), "--json-output"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["hits"][0]["title"] == "Evidence Page"
+        assert payload["hits"][0]["page_type"] == "article"
 
     def test_index_rebuild_reuses_sidecars_and_deletes_orphans(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")

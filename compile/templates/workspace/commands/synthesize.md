@@ -16,8 +16,8 @@ Workflow:
    - Stay inside that chosen theme or cluster for this pass. If you notice adjacent cleanup work outside it, note it for later rather than expanding scope mid-pass.
 4. For each source in the target cluster: read the source note, confirm the theme fits, and check whether an existing article or map already covers it.
 5. Create or update the synthesis:
-   - If an article exists, update it to draw claims from each source in the cluster, citing each with `[[Source Title]]`.
-   - If no article exists and the cluster has 3+ sources, create a new `seed` article that synthesizes across them. Open with a framing question or thesis. Name agreements, disagreements, and remaining uncertainty.
+   - If an article exists, **use the `Edit` tool** on its `.md` file to integrate claims from each source into the relevant section — add new `[[Source Title]]` citations, extend the disagreement prose, or tighten a specific claim. Do not regenerate the whole article body unless it is genuinely broken and warrants a deliberate full rewrite via `compile obsidian upsert --body-file ...`.
+   - If no article exists and the cluster has 3+ sources, create a new `seed` article via `compile obsidian upsert --page-type article --status seed --body-file ...`. Open with a framing question or thesis. Name agreements, disagreements, and remaining uncertainty.
    - If the cluster has 5+ sources, also consider a map page as a navigational hub.
 6. Wire each source note to the synthesis. Ensure either the source note links out to the article/map or the article cites the source with `[[Source Title]]`. Verify with `compile obsidian neighbors`.
 7. Surface disagreement. If sources in the cluster materially disagree, add a `> [!warning] Disagreement` callout naming both sources and the specific point of contention. Do not resolve it by picking a winner.

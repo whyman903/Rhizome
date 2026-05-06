@@ -1,7 +1,7 @@
 [project]
-name = "compile-wiki"
+name = "rhizome"
 version = "0.2.0"
-description = "Compile: an LLM-maintained wiki workspace for persistent personal knowledge."
+description = "Rhizome: an LLM-maintained wiki workspace for persistent personal knowledge."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -33,31 +33,31 @@ def _write_page(path: Path, title: str, page_type: str, body: str, summary: str 
 
 class TestInitWorkspace:
     def test_creates_directory_structure(self, tmp_path: Path) -> None:
-        config = init_workspace(tmp_path, "My Wiki", "A test wiki.")
+        config = init_workspace(tmp_path, "Rhizome", "A test wiki.")
         assert (tmp_path / "raw").is_dir()
         assert (tmp_path / "wiki" / "articles").is_dir()
         assert (tmp_path / "wiki" / "sources").is_dir()
         assert (tmp_path / "wiki" / "outputs").is_dir()
         assert (tmp_path / "wiki" / "maps").is_dir()
         assert (tmp_path / ".compile").is_dir()
-        assert config.topic == "My Wiki"
+        assert config.topic == "Rhizome"
 
     def test_creates_navigation_files(self, tmp_path: Path) -> None:
-        init_workspace(tmp_path, "My Wiki")
+        init_workspace(tmp_path, "Rhizome")
         assert (tmp_path / "wiki" / "index.md").exists()
         assert (tmp_path / "wiki" / "overview.md").exists()
         assert (tmp_path / "wiki" / "log.md").exists()
 
     def test_creates_wiki_schema(self, tmp_path: Path) -> None:
-        init_workspace(tmp_path, "My Wiki", "Test description")
+        init_workspace(tmp_path, "Rhizome", "Test description")
         schema = (tmp_path / "WIKI.md").read_text()
-        assert "My Wiki" in schema
+        assert "Rhizome" in schema
         assert "Test description" in schema
         assert "Broad topic hubs to maintain" in schema
         assert "Recurring subtopics to group under those hubs" in schema
 
     def test_creates_obsidian_config(self, tmp_path: Path) -> None:
-        init_workspace(tmp_path, "My Wiki")
+        init_workspace(tmp_path, "Rhizome")
         assert (tmp_path / ".obsidian").is_dir()
         assert (tmp_path / ".obsidian" / "app.json").exists()
         assert (tmp_path / ".obsidian" / "graph.json").exists()
@@ -69,15 +69,15 @@ class TestInitWorkspace:
             init_workspace(tmp_path, "Second")
 
     def test_initial_state(self, tmp_path: Path) -> None:
-        config = init_workspace(tmp_path, "My Wiki")
+        config = init_workspace(tmp_path, "Rhizome")
         state = load_state(config)
         assert state["processed"] == {}
         assert "created_at" in state
 
     def test_log_contains_init_entry(self, tmp_path: Path) -> None:
-        init_workspace(tmp_path, "My Wiki")
+        init_workspace(tmp_path, "Rhizome")
         log = (tmp_path / "wiki" / "log.md").read_text()
-        assert "init | My Wiki" in log
+        assert "init | Rhizome" in log
         assert "Workspace initialized" in log
 
 

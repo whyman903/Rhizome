@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import urlparse
+import re
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -12,7 +13,7 @@ from markdownify import markdownify as md
 from compile.dates import now_machine
 from compile.text import SUPPORTED_EXTENSIONS, slugify
 
-_USER_AGENT = "compile-wiki/0.2 (personal knowledge base builder)"
+_USER_AGENT = "rhizome/0.2 (personal knowledge base builder)"
 _TIMEOUT = 30
 _HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
 _CONTENT_TYPE_EXTENSIONS = {
@@ -170,7 +171,6 @@ def _unique_path(raw_dir: Path, slug: str, suffix: str) -> Path:
 
 def _clean_markdown(text: str) -> str:
     """Remove excessive blank lines and trailing whitespace."""
-    import re
     text = re.sub(r"\n{3,}", "\n\n", text)
     lines = [line.rstrip() for line in text.splitlines()]
     return "\n".join(lines).strip() + "\n"
@@ -178,7 +178,6 @@ def _clean_markdown(text: str) -> str:
 
 def _strip_duplicate_title(markdown_body: str, title: str) -> str:
     """Remove a leading ``# Title`` line if it duplicates the title we prepend."""
-    import re
     pattern = re.compile(r"^#\s+" + re.escape(title) + r"\s*\n+", re.IGNORECASE)
     return pattern.sub("", markdown_body, count=1)
 
@@ -189,8 +188,6 @@ def _download_images(
     raw_dir: Path,
 ) -> None:
     """Download <img> sources into raw/assets/ and rewrite src attributes."""
-    from urllib.parse import urljoin
-
     assets_dir = raw_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
 
@@ -208,7 +205,7 @@ def _download_images(
         # Determine filename from URL path
         url_path = urlparse(abs_url).path
         filename = slugify(Path(url_path).stem) or "image"
-        suffix = Path(url_path).suffix or _guess_extension(resp.headers.get("content-type", ""))
+        suffix = Path(url_path).suffix or _CONTENT_TYPE_EXTENSIONS.get(_normalize_content_type(resp.headers.get("content-type", "")), "")
         if not suffix:
             suffix = ".png"
         dest = assets_dir / f"{filename}{suffix}"
@@ -219,15 +216,3 @@ def _download_images(
         dest.write_bytes(resp.content)
         # Rewrite the img src to local relative path
         img["src"] = f"assets/{dest.name}"
-
-
-def _guess_extension(content_type: str) -> str:
-    """Map a Content-Type to a file extension."""
-    ct = content_type.lower().split(";")[0].strip()
-    return {
-        "image/png": ".png",
-        "image/jpeg": ".jpg",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-        "image/svg+xml": ".svg",
-    }.get(ct, "")

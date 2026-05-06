@@ -73,6 +73,78 @@ class TestExtractWikilinks:
         links = extract_wikilinks(body)
         assert links == []
 
+    def test_fenced_code_block_wikilinks_ignored(self) -> None:
+        body = (
+            "See [[Real Link]].\n\n"
+            "```python\n"
+            "# [[Ghost In Code]] should not count\n"
+            "x = \"[[Also Ghost]]\"\n"
+            "```\n\n"
+            "And [[Another Real]]."
+        )
+        assert extract_wikilinks(body) == ["Real Link", "Another Real"]
+
+    def test_callout_prefixed_fenced_code_wikilinks_ignored(self) -> None:
+        body = (
+            "> [!note]- Nested code example\n"
+            "> See [[Real Callout Link]].\n"
+            "> ```python\n"
+            "> [[Ghost Topic]]\n"
+            "> ```\n"
+            "> End of callout."
+        )
+        assert extract_wikilinks(body) == ["Real Callout Link"]
+
+    def test_inline_code_wikilinks_ignored(self) -> None:
+        body = "See [[Real]] and `[[Ghost]]` and more `code [[Also Ghost]] here`."
+        assert extract_wikilinks(body) == ["Real"]
+
+    def test_tilde_fence_wikilinks_ignored(self) -> None:
+        body = (
+            "See [[Real]].\n\n"
+            "~~~\n"
+            "[[Ghost]]\n"
+            "~~~\n"
+        )
+        assert extract_wikilinks(body) == ["Real"]
+
+    def test_full_text_callout_wikilinks_ignored(self) -> None:
+        body = (
+            "See [[Real Outbound]].\n\n"
+            "## Provenance\n\n"
+            "- Source file: ![[raw/imported.md]]\n\n"
+            "> [!abstract]- Full extracted text\n"
+            "> Imported prose linking to [[Ghost Topic]].\n"
+            "> And another [[Ghost Two]] reference.\n"
+        )
+        assert extract_wikilinks(body) == ["Real Outbound", "raw/imported.md"]
+
+    def test_double_backtick_inline_code_wikilinks_ignored(self) -> None:
+        body = "See [[Real]] and ``code with ` and [[Ghost]]`` here."
+        assert extract_wikilinks(body) == ["Real"]
+
+    def test_longer_opening_fence_requires_matching_close(self) -> None:
+        body = (
+            "See [[Real]].\n\n"
+            "````markdown\n"
+            "```inner\n"
+            "[[Ghost Inside]]\n"
+            "```\n"
+            "[[Also Ghost]]\n"
+            "````\n\n"
+            "After [[Real Two]]."
+        )
+        assert extract_wikilinks(body) == ["Real", "Real Two"]
+
+    def test_full_text_callout_stops_at_blank_line(self) -> None:
+        body = (
+            "> [!abstract]- Full extracted text\n"
+            "> [[Ghost]]\n"
+            "\n"
+            "After the callout: [[Real]].\n"
+        )
+        assert extract_wikilinks(body) == ["Real"]
+
 
 class TestCountContentParagraphs:
     def test_counts_substantial_lines(self) -> None:

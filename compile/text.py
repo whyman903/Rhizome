@@ -4,9 +4,18 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 from compile.markdown import parse_markdown_text
+
+
+HTML_BLOCK_TAGS = frozenset({
+    "address", "article", "aside", "blockquote", "dd", "details", "dialog",
+    "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "li", "main",
+    "nav", "ol", "p", "pre", "section", "table", "tbody", "td", "tfoot", "th",
+    "thead", "tr", "ul",
+})
 
 
 SUPPORTED_EXTENSIONS = {
@@ -44,6 +53,7 @@ class ExtractedSource:
     requires_document_review: bool = False
     warnings: tuple[str, ...] = ()
     page_texts: tuple[ExtractedPageText, ...] = ()
+    full_text: str = ""
 
 
 def slugify(value: str) -> str:
@@ -183,13 +193,59 @@ def _extract_html(path: Path) -> ExtractedSource:
         if text
     ]
     text = normalize_text(body_node.get_text(" ", strip=True))
+    block_text = _html_block_text(body_node)
     return ExtractedSource(
         title=title[:120],
         normalized_text=text,
-        paragraphs=tuple(paragraphs or _paragraphs_from_text(body_node.get_text("\n\n", strip=True))),
+        paragraphs=tuple(paragraphs or _paragraphs_from_text(block_text)),
         headings=tuple(_dedupe_headings(headings, title[:120])),
         metadata_only=False,
+        full_text=block_text,
     )
+
+
+def _html_block_text(node: Tag) -> str:
+    """Flatten an HTML subtree to text with block-level boundaries preserved.
+
+    Inline siblings (e.g., ``<strong>`` inside a ``<p>``) are joined with a
+    single space so a phrase like ``Hello <em>world</em>`` stays on one line.
+    Block-level elements introduce paragraph breaks (``\\n\\n``). This avoids
+    BeautifulSoup's ``get_text("\\n\\n")`` behaviour, which inserts the
+    separator between *all* adjacent text nodes and shreds inline prose.
+    """
+    blocks: list[str] = []
+    buffer: list[str] = []
+
+    def flush() -> None:
+        if not buffer:
+            return
+        joined = "".join(buffer)
+        collapsed = re.sub(r"\s+", " ", joined).strip()
+        if collapsed:
+            blocks.append(collapsed)
+        buffer.clear()
+
+    def walk(element: object) -> None:
+        if isinstance(element, NavigableString):
+            buffer.append(str(element))
+            return
+        if not isinstance(element, Tag):
+            return
+        if element.name == "br":
+            flush()
+            return
+        if element.name in HTML_BLOCK_TAGS:
+            flush()
+            for child in element.children:
+                walk(child)
+            flush()
+            return
+        for child in element.children:
+            walk(child)
+
+    walk(node)
+    flush()
+    return "\n\n".join(blocks)
 
 
 def _extract_markdown(path: Path) -> ExtractedSource:
@@ -207,6 +263,7 @@ def _extract_markdown(path: Path) -> ExtractedSource:
         paragraphs=tuple(paragraphs),
         headings=tuple(headings),
         metadata_only=False,
+        full_text=markdown_body.strip(),
     )
 
 
@@ -246,12 +303,6 @@ def _pdf_placeholder(title: str) -> ExtractedSource:
     )
 
 
-def pdf_placeholder_source(path_or_title: Path | str) -> ExtractedSource:
-    if isinstance(path_or_title, Path):
-        return _pdf_placeholder(title_from_path(path_or_title))
-    return _pdf_placeholder(str(path_or_title).strip() or "Untitled")
-
-
 def source_from_pdf_pages(
     title: str,
     page_texts: tuple[ExtractedPageText, ...],
@@ -259,7 +310,8 @@ def source_from_pdf_pages(
     warnings: tuple[str, ...] = (),
     requires_document_review: bool = True,
 ) -> ExtractedSource:
-    full_text = "\n\n".join(page.text for page in page_texts).strip()
+    cleaned = _strip_repeated_boilerplate(page_texts)
+    full_text = _render_paged_full_text(cleaned)
     normalized = normalize_text(full_text)
     paragraphs = tuple(_paragraphs_from_text(full_text))
     return ExtractedSource(
@@ -271,8 +323,64 @@ def source_from_pdf_pages(
         extraction_method="pymupdf_text",
         requires_document_review=requires_document_review,
         warnings=tuple(warnings),
-        page_texts=page_texts,
+        page_texts=cleaned,
+        full_text=full_text,
     )
+
+
+_BOILERPLATE_PAGE_FRACTION = 0.6
+_BOILERPLATE_MIN_PAGES = 3
+
+
+def _strip_repeated_boilerplate(
+    page_texts: tuple[ExtractedPageText, ...],
+) -> tuple[ExtractedPageText, ...]:
+    """Drop lines that appear on a majority of pages.
+
+    Slide decks and branded reports repeat a fixed header/footer on every
+    page. Those lines are not content — they pad the extracted text and
+    bloat the full-text callout. A line is treated as boilerplate when its
+    stripped form appears on at least ``_BOILERPLATE_PAGE_FRACTION`` of the
+    pages (minimum three pages). Idempotent: a second pass finds no lines
+    over threshold because the first pass already removed them.
+    """
+    if len(page_texts) < _BOILERPLATE_MIN_PAGES:
+        return page_texts
+
+    from collections import Counter
+
+    counter: Counter[str] = Counter()
+    for page in page_texts:
+        seen: set[str] = set()
+        for line in page.text.splitlines():
+            key = line.strip()
+            if not key or key in seen:
+                continue
+            counter[key] += 1
+            seen.add(key)
+
+    threshold = max(2, int(round(len(page_texts) * _BOILERPLATE_PAGE_FRACTION)))
+    boilerplate = {line for line, count in counter.items() if count >= threshold}
+    if not boilerplate:
+        return page_texts
+
+    cleaned: list[ExtractedPageText] = []
+    for page in page_texts:
+        kept = [line for line in page.text.splitlines() if line.strip() not in boilerplate]
+        stripped = "\n".join(kept).strip()
+        if stripped:
+            cleaned.append(ExtractedPageText(page_number=page.page_number, text=stripped))
+    return tuple(cleaned) if cleaned else page_texts
+
+
+def _render_paged_full_text(page_texts: tuple[ExtractedPageText, ...]) -> str:
+    """Join page texts with scannable ``--- Page N ---`` separators."""
+    if not page_texts:
+        return ""
+    if len(page_texts) == 1:
+        return page_texts[0].text.strip()
+    sections = [f"--- Page {page.page_number} ---\n\n{page.text}" for page in page_texts]
+    return "\n\n".join(sections).strip()
 
 
 def _strip_comments(text: str) -> str:

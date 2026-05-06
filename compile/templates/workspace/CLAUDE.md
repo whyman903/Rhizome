@@ -1,4 +1,4 @@
-# Compile — Wiki Maintainer Contract
+# Rhizome — Wiki Maintainer Contract
 
 You maintain a persistent, LLM-maintained wiki for Obsidian. The wiki compounds over time: every source processed and every useful answer saved should make it better.
 
@@ -69,8 +69,9 @@ compile obsidian upsert "Title" \
 ### Tool selection
 
 - Search before creating pages. Prefer updating an existing page over spawning a near-duplicate.
-- The slash-command workflows are the primary contract. Keep `compile obsidian upsert` below the fold: use it when a workflow needs to rewrite or retag a page.
-- Prefer `compile obsidian upsert --body-file ...` when a direct page write is necessary. A substantive rewrite via `--body-file` automatically clears `review_status: needs_document_review`; pass `--keep-review-status` to opt out, or `--clear-review-status` to force-clear after any write.
+- **Prefer targeted edits over rewrites.** When updating an existing page with a narrow change — fixing a claim, adding a bullet, revising one section, inserting a `[[wikilink]]` or citation, tightening a summary line — use the `Edit` tool directly on the `.md` file in `wiki/`. Rewriting a long page to change one paragraph invites hallucination in the parts you did not mean to touch.
+- Keep `compile obsidian upsert` below the fold: use it for (a) creating a new page, (b) frontmatter-only updates like status, tags, or sources, or (c) a deliberate whole-body rewrite where a surgical edit is not enough.
+- When a full rewrite is warranted, use `compile obsidian upsert --body-file ...`. A substantive rewrite via `--body-file` automatically clears `review_status: needs_document_review`; pass `--keep-review-status` to opt out, or `--clear-review-status` to force-clear after any write.
 - Run `compile obsidian refresh` after page changes, then `compile health`.
 - Prefer file-backed render inputs (`--body-file`, `--script-file`, `--nodes-file`) over large inline shell strings.
 
@@ -78,21 +79,22 @@ compile obsidian upsert "Title" \
 
 The wiki is not text-only. Markdown paragraphs are the fallback, but richer formats should be used selectively when they materially improve comprehension or navigation.
 
-Format triggers — use the first match:
+Format triggers — use the first match, with explicit user wording taking precedence over internal labels or eval slugs:
 
 | Trigger | Format |
 |---|---|
 | Comparison of 3+ items on shared dimensions | Table (or `compile render chart` if quantitative) |
-| Relationships between 4+ concepts, causal chains, actor maps, dependencies | `compile render canvas` |
+| Explicit request to build/make/render/create a deck, chart, or canvas | Create the artifact immediately with `compile render ...` and report the created path |
+| Relationships between 4+ concepts, causal chains, actor maps, dependencies | Mermaid in-page, unless the user explicitly requested a saved canvas |
 | Sequential process, argument flow, or small hierarchy (3–15 nodes) | Mermaid diagram in-page |
-| Teaching explanation, briefing, or walkthrough | `compile render marp` |
-| Quantitative data, trends, distributions | `compile render chart` |
+| Teaching explanation, briefing, or walkthrough | Structured prose or Mermaid; use `compile render marp` only when the user asks to build a deck |
+| Quantitative data, trends, distributions | Table or inline recommendation; use `compile render chart` only when the user asks for a chart artifact |
 | Notable caveat, definition, or strong claim | Callout (`> [!note]`, `> [!warning]`, etc.) |
 | None of the above | Plain prose with wikilinks |
 
-Use callouts freely alongside any format — they are always appropriate for caveats and definitions.
+Use callouts when they add clarity. For math, use KaTeX-compatible LaTeX math notation, not Unicode math symbols. Inline math must include literal backslash delimiters like `\(...\)`, not bare `( ... )`; use `$$...$$` or `\[...\]` for display math. Use explicit subscripts/superscripts such as `x_s`, `\hat{S}_{ij}`, and `\sum_{i=1}^{h}`. Do not emit malformed TeX like `\hat{S}{ij}`, `\mathbf{x}s`, `\sum{i=1}^{h}`, or `\text{softmax}{...}` when you mean a subscript or operator argument.
 
-Do not create rendered artifacts by default for routine notes or answers. Offer them when they would clearly help, and create them when the user asks for them or explicitly agrees.
+Do not create rendered artifacts by default for routine notes or answers. Offer them when they would clearly help, and create them when the user asks for them or explicitly agrees. "Build/make/render/create me a deck/chart/canvas" is explicit consent to render and save that artifact; after rendering, report the created path and do not ask whether to save it again.
 
 ## Ingest Workflow
 
@@ -140,12 +142,22 @@ PDF handling is best-effort.
 
 When answering questions against the wiki:
 
-1. Search the wiki first.
-2. Read wiki pages before raw files.
-3. Pull raw sources only when needed for verification or missing detail.
-4. Before presenting an answer, check the format triggers above and pick the best fit.
-5. Save durable answers back into the wiki when they will be useful later.
-6. When saving durable material, wire it into the existing wiki structure by updating the relevant article, map, index, or overview page rather than leaving it isolated.
+1. Classify the request before researching: brief lookup, synthesis, inventory/count, quote retrieval, audit/dedup, draft, absence check, or explicit artifact request.
+2. Search the wiki first and read wiki pages before raw files.
+3. Use the right evidence protocol:
+   - Absence claims require both `compile obsidian search` and direct `rg`/file search across `wiki/` and `raw/`; state what you searched.
+   - Inventory/count/dedup queries start with a broad aggregation pass (`rg -l`, `grep -rl`, `grep -rh "^sources:"`, `find`, `wc`) before candidate reads.
+   - Quote/verbatim queries read the source note and raw source early when available.
+   - Source-accounting queries read each named source note when it exists.
+   - Modern technical/current topics outside the wiki should use WebSearch/WebFetch when current grounding would materially improve the answer.
+4. Prefer `Read`, `Glob`, and `Grep` for file inspection; reserve Bash mainly for `compile` commands and broad aggregation shell commands. Do not use todo/planning tools for query answers.
+5. Keep searches bounded: after a broad pass plus about five targeted searches, answer with the evidence gathered and offer to dig further if useful.
+6. Always answer the user's question. The wiki is the preferred evidence base, not a hard boundary on what you can answer.
+7. If the wiki partially covers the question, cite the supported claims with `[[wikilinks]]` and answer the unsupported remainder from web-backed or general knowledge, briefly noting that those parts are not in the wiki.
+8. If the wiki does not cover the question at all, say that once up front and answer from web-backed or general knowledge anyway. Do not refuse just because a topic is outside the wiki, and do not fall back to knowledge-cutoff disclaimers when a normal answer would suffice.
+9. Match the user's register. Brief/casual requests get concise prose and no save offer.
+10. Choose persistence by destination, not ritual: offer to fold synthesis into an existing article/map, apply concrete audit fixes, delete/redirect duplicates, or iterate on drafts. Offer a new `output` page only when no better home exists and the answer is reusable.
+11. When saving durable material, wire it into the existing wiki structure by updating the relevant article, map, index, or overview page rather than leaving it isolated.
 
 ## Lint Workflow
 
@@ -184,7 +196,7 @@ Optional when relevant: `tags`, `aliases`, `sources`, `source_ids`, `cssclasses`
 9. Keep map pages lightweight and navigational; use whatever structure helps readers browse the topic. A map should cover a coherent cluster — if it would group unrelated single-source themes into a "miscellaneous" bucket, log the gap and defer the map until a real cluster forms.
 10. Surface disagreement. When two sources materially disagree — on factual claims, normative positions, or theoretical frameworks — name the disagreement directly in prose in the relevant article, citing both sources and the specific point of contention. Do not resolve the disagreement by picking a winner. Present both positions with their evidence or reasoning. Do not use `> [!warning] Disagreement` callouts; write disagreements as plain sentences so the article reads as a finished piece.
 11. During `/ingest`, keep edits local: the source note plus 1–3 theme anchors. Use `/lint` or `/synthesize` for broader changes.
-12. Render math as LaTeX, not Unicode. When rewriting source notes or synthesis pages, convert any Unicode math (superscripts like `ᵀ ⁺ ⁻`, subscripts like `ᵢ ₀`, operators like `Σ ∑ ∫ ∏ ≤ ≥ ≠ ∈ ∀ ∃ ∞`, Greek letters used as variables, etc.) into LaTeX wrapped in `$...$` for inline expressions or `$$...$$` for block expressions. PyMuPDF and Notion exports commonly emit Unicode math that Obsidian does not render — leaving it as raw Unicode produces unreadable notes. Do not leave mathematical expressions as raw Unicode in any maintained page.
+12. Render math as KaTeX-compatible LaTeX, not Unicode. When rewriting source notes or synthesis pages, convert any Unicode math (superscripts like `ᵀ ⁺ ⁻`, subscripts like `ᵢ ₀`, operators like `Σ ∑ ∫ ∏ ≤ ≥ ≠ ∈ ∀ ∃ ∞`, Greek letters used as variables, etc.) into LaTeX wrapped in `\(...\)` for inline expressions and `$$...$$` or `\[...\]` for block expressions. PyMuPDF and Notion exports commonly emit Unicode math that Obsidian does not render — leaving it as raw Unicode produces unreadable notes. Do not leave mathematical expressions as raw Unicode in any maintained page. Preserve literal math delimiters and explicit subscript/superscript braces; write `\hat{S}_{ij}`, `\mathbf{x}_s`, and `\sum_{i=1}^{h}`, not `\hat{S}{ij}`, `\mathbf{x}s`, or `\sum{i=1}^{h}`.
 
 ## Status Discipline
 

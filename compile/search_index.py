@@ -419,27 +419,15 @@ def _resolve_search_display_metadata(
     fallback_page_type: str,
     fallback_summary: str,
 ) -> tuple[str, str, str, str]:
+    fallback = (fallback_title, fallback_relative_path, fallback_page_type, fallback_summary)
     if connector is None:
-        return (
-            fallback_title,
-            fallback_relative_path,
-            fallback_page_type,
-            fallback_summary,
-        )
-
+        return fallback
     try:
         source_page = connector.find_source_page_by_raw_path(raw_relative)
     except ValueError:
         source_page = None
-
     if source_page is None:
-        return (
-            fallback_title,
-            fallback_relative_path,
-            fallback_page_type,
-            fallback_summary,
-        )
-
+        return fallback
     return (
         source_page.title,
         source_page.relative_path,

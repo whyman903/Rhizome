@@ -97,10 +97,7 @@ class MapSuggestion:
         return {
             "map_title": self.map_title,
             "map_path": self.map_path,
-            "source_notes": [
-                {"title": page.title, "relative_path": page.relative_path}
-                for page in self.source_notes
-            ],
+            "source_notes": [{"title": p.title, "relative_path": p.relative_path} for p in self.source_notes],
             "score": self.score,
             "reason": self.reason,
         }

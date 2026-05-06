@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 
-from compile.markdown import WIKILINK_RE, count_content_paragraphs, parse_markdown_text
+from compile.markdown import WIKILINK_RE, count_content_paragraphs, parse_markdown_text, strip_code_regions
 from compile.page_types import ARTICLE_PAGE_TYPES
 
 
@@ -46,7 +46,7 @@ def verify_page_content(
         )
 
     valid_targets = {target.casefold() for target in valid_link_targets}
-    for match in WIKILINK_RE.finditer(content):
+    for match in WIKILINK_RE.finditer(strip_code_regions(content)):
         link_target = match.group(1).strip()
         if not link_target or link_target.startswith("raw/"):
             continue
@@ -55,7 +55,7 @@ def verify_page_content(
                 VerificationIssue("medium", "unresolved_wikilink", f"Page links to unresolved target [[{link_target}]].")
             )
 
-    para_count = count_content_paragraphs(body)
+    para_count = count_content_paragraphs(strip_code_regions(body))
     if para_count < 2:
         issues.append(
             VerificationIssue("low", "thin_content", f"Page has only {para_count} content paragraph(s).")

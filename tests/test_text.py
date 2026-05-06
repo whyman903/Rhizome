@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from compile.ingest import render_full_text_callout
 from compile.text import (
+    ExtractedPageText,
     extract_source,
     extract_text,
     fix_pdf_artifacts,
@@ -14,6 +16,7 @@ from compile.text import (
     normalize_text,
     sanitize_raw_filename,
     slugify,
+    source_from_pdf_pages,
 )
 
 
@@ -57,6 +60,15 @@ class TestSlugify:
 
     def test_leading_trailing_hyphens_stripped(self) -> None:
         assert slugify("--hello--") == "hello"
+
+
+def test_render_full_text_callout_prefixes_every_line() -> None:
+    assert render_full_text_callout("First paragraph.\n\nSecond paragraph.") == (
+        "> [!abstract]- Full extracted text\n"
+        "> First paragraph.\n"
+        ">\n"
+        "> Second paragraph."
+    )
 
 
 class TestSanitizeRawFilename:
@@ -172,6 +184,24 @@ class TestExtractText:
             "Real paragraph here with enough words to count as substantive content for the synopsis.",
         )
 
+    def test_markdown_full_text_preserves_fenced_code_and_structure(self, tmp_path: Path) -> None:
+        md_file = tmp_path / "code.md"
+        md_file.write_text(
+            "# Code Notes\n\n"
+            "Intro paragraph.\n\n"
+            "```python\n"
+            "very_long_code_identifier = 1\n"
+            "def compute(x):\n"
+            "    return x * 2\n"
+            "```\n\n"
+            "Closing paragraph.\n"
+        )
+        extracted = extract_source(md_file)
+        assert "very_long_code_identifier = 1" in extracted.full_text
+        assert "def compute(x):" in extracted.full_text
+        assert "```python" in extracted.full_text
+        assert "\n" in extracted.full_text  # structure preserved, not collapsed
+
     def test_txt_file(self, tmp_path: Path) -> None:
         txt_file = tmp_path / "notes.txt"
         txt_file.write_text("Plain text content.\nMultiple lines.")
@@ -193,12 +223,49 @@ class TestExtractText:
         title, text = extract_text(html_file)
         assert "Article content" in text
 
+    def test_html_full_text_preserves_inline_runs(self, tmp_path: Path) -> None:
+        html_file = tmp_path / "inline.html"
+        html_file.write_text(
+            "<html><body><p>Hello <strong>world</strong>, this is "
+            "<em>inline</em> prose.</p></body></html>"
+        )
+        extracted = extract_source(html_file)
+        assert "Hello world, this is inline prose." in extracted.full_text
+        assert "Hello\n\nworld" not in extracted.full_text
+
+    def test_html_full_text_separates_blocks(self, tmp_path: Path) -> None:
+        html_file = tmp_path / "blocks.html"
+        html_file.write_text(
+            "<html><body>"
+            "<p>First paragraph text.</p>"
+            "<p>Second paragraph text.</p>"
+            "</body></html>"
+        )
+        extracted = extract_source(html_file)
+        assert "First paragraph text.\n\nSecond paragraph text." in extracted.full_text
+
     def test_pdf_file(self, tmp_path: Path) -> None:
         pdf_file = tmp_path / "paper.pdf"
         pdf_file.write_bytes(b"%PDF-1.4 fake")
         title, text = extract_text(pdf_file)
         assert title == "Paper"
         assert "PDF source" in text
+
+    def test_pdf_full_text_has_page_separators(self, tmp_path: Path) -> None:
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir()
+        pdf_file = raw_dir / "deck.pdf"
+        _write_pdf(
+            pdf_file,
+            page_texts=[
+                "Alpha page prose that is long enough to survive extraction.",
+                "Beta page prose that is long enough to survive extraction.",
+            ],
+        )
+
+        extracted = extract_source(pdf_file)
+        assert "--- Page 1 ---" in extracted.full_text
+        assert "--- Page 2 ---" in extracted.full_text
 
     def test_pdf_extracts_text(self, tmp_path: Path) -> None:
         raw_dir = tmp_path / "raw"
@@ -228,6 +295,62 @@ class TestExtractText:
         bad_file.write_text("data")
         with pytest.raises(ValueError, match="Unsupported"):
             extract_text(bad_file)
+
+
+class TestSourceFromPdfPages:
+    def test_drops_repeated_boilerplate_lines(self) -> None:
+        footer = "@author example.com conference-2026"
+        pages = tuple(
+            ExtractedPageText(
+                page_number=i,
+                text=f"{footer}\nUnique body for page {i} with substantive prose to keep.",
+            )
+            for i in range(1, 5)
+        )
+
+        extracted = source_from_pdf_pages("Deck", pages)
+
+        assert footer not in extracted.full_text
+        for i in range(1, 5):
+            assert f"Unique body for page {i}" in extracted.full_text
+        for page in extracted.page_texts:
+            assert footer not in page.text
+
+    def test_keeps_lines_below_threshold(self) -> None:
+        pages = (
+            ExtractedPageText(page_number=1, text="Shared header\nPage one body."),
+            ExtractedPageText(page_number=2, text="Shared header\nPage two body."),
+            ExtractedPageText(page_number=3, text="Page three body only."),
+            ExtractedPageText(page_number=4, text="Page four body only."),
+            ExtractedPageText(page_number=5, text="Page five body only."),
+        )
+
+        extracted = source_from_pdf_pages("Mixed", pages)
+
+        # "Shared header" appears on 2/5 = 40% < 60% threshold, keep it.
+        assert "Shared header" in extracted.full_text
+
+    def test_single_page_has_no_separator(self) -> None:
+        pages = (
+            ExtractedPageText(page_number=1, text="Only-page prose of reasonable length."),
+        )
+
+        extracted = source_from_pdf_pages("Single", pages)
+
+        assert "--- Page" not in extracted.full_text
+        assert extracted.full_text == "Only-page prose of reasonable length."
+
+    def test_dedupe_is_idempotent(self) -> None:
+        footer = "repeated footer line"
+        pages = tuple(
+            ExtractedPageText(page_number=i, text=f"{footer}\nBody {i}.")
+            for i in range(1, 5)
+        )
+
+        first = source_from_pdf_pages("A", pages)
+        second = source_from_pdf_pages("A", first.page_texts)
+
+        assert first.full_text == second.full_text
 
 
 class TestIsUrl:

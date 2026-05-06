@@ -18,6 +18,7 @@ class IngestArtifact:
     metadata_only: bool
     extraction_method: str | None
     needs_document_review: bool
+    full_text: str = ""
 
 
 def build_ingest_artifact(
@@ -29,6 +30,11 @@ def build_ingest_artifact(
 ) -> IngestArtifact:
     effective_title = title or extracted.title
     synopsis = _build_synopsis(extracted)
+    full_text = ""
+    if not extracted.metadata_only:
+        candidate = extracted.full_text or extracted.normalized_text
+        if candidate.strip():
+            full_text = candidate
     return IngestArtifact(
         title=effective_title,
         page_summary=_frontmatter_summary(synopsis),
@@ -38,6 +44,7 @@ def build_ingest_artifact(
         metadata_only=extracted.metadata_only,
         extraction_method=extracted.extraction_method,
         needs_document_review=extracted.requires_document_review,
+        full_text=full_text,
     )
 
 
@@ -81,7 +88,20 @@ def render_source_body(artifact: IngestArtifact) -> str:
         "",
         f"- Source file: ![[{artifact.raw_relative}]]",
     ])
+    if artifact.full_text:
+        lines.extend([
+            "",
+            render_full_text_callout(artifact.full_text),
+        ])
     return "\n".join(lines)
+
+
+def render_full_text_callout(full_text: str) -> str:
+    prefixed = "\n".join(
+        f"> {line}" if line else ">"
+        for line in full_text.splitlines()
+    )
+    return f"> [!abstract]- Full extracted text\n{prefixed}"
 
 
 def _build_synopsis(extracted: ExtractedSource) -> str:

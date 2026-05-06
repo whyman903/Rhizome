@@ -1,0 +1,244 @@
+:root {
+    color-scheme: light dark;
+}
+
+html,
+body {
+    background: transparent;
+    color: var(--rhizome-text);
+    font-family: var(--rhizome-font-family);
+    font-size: 14px;
+    line-height: 1.45;
+    margin: 0;
+    overflow: hidden;
+    padding: 0;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+#content {
+    display: flow-root;
+    min-height: 1px;
+}
+
+body > *:first-child {
+    margin-top: 0;
+}
+
+body > *:last-child {
+    margin-bottom: 0;
+}
+
+#content > *:first-child {
+    margin-top: 0;
+}
+
+#content > *:last-child {
+    margin-bottom: 0;
+}
+
+p {
+    margin: 0 0 0.7em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    color: var(--rhizome-text);
+    font-weight: 650;
+    line-height: 1.2;
+    margin: 1em 0 0.45em;
+}
+
+h1 {
+    font-size: 1.45em;
+}
+
+h2 {
+    font-size: 1.25em;
+}
+
+h3 {
+    font-size: 1.1em;
+}
+
+a {
+    color: var(--rhizome-link);
+    text-decoration: underline;
+}
+
+a.wiki-link,
+a.file-link {
+    background: var(--rhizome-surface);
+    border: 1px solid var(--rhizome-border);
+    border-radius: 999px;
+    color: var(--rhizome-secondary);
+    align-items: center;
+    display: inline-flex;
+    font-size: 0.82em;
+    font-weight: 650;
+    line-height: 1;
+    margin: 0 0.08em;
+    max-width: min(32rem, 100%);
+    min-height: 1.42em;
+    overflow: hidden;
+    padding: 0 0.58em;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    vertical-align: baseline;
+    white-space: nowrap;
+}
+
+a.wiki-link:hover,
+a.file-link:hover {
+    background: var(--rhizome-surface-hover);
+    border-color: var(--rhizome-border-hover);
+    color: var(--rhizome-text);
+}
+
+code {
+    background: var(--rhizome-surface);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92em;
+    padding: 0.08em 0.28em;
+}
+
+pre {
+    background: var(--rhizome-surface);
+    border: 1px solid var(--rhizome-border);
+    border-radius: 6px;
+    margin: 0.8em 0;
+    overflow-x: auto;
+    padding: 10px 12px;
+}
+
+pre code {
+    background: transparent;
+    padding: 0;
+}
+
+blockquote {
+    border-left: 3px solid var(--rhizome-accent);
+    color: var(--rhizome-secondary);
+    margin: 0.8em 0;
+    padding: 0.1em 0 0.1em 0.9em;
+}
+
+ul,
+ol {
+    margin: 0.4em 0 0.8em 1.4em;
+    padding: 0;
+}
+
+li {
+    margin: 0.2em 0;
+}
+
+table {
+    border-collapse: collapse;
+    display: block;
+    margin: 0.9em 0;
+    max-width: 100%;
+    overflow-x: auto;
+    width: max-content;
+}
+
+th,
+td {
+    border: 1px solid var(--rhizome-border);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    background: var(--rhizome-surface);
+    color: var(--rhizome-text);
+    font-weight: 650;
+}
+
+td {
+    color: var(--rhizome-text);
+}
+
+img {
+    border-radius: 6px;
+    display: block;
+    height: auto;
+    margin: 0.8em 0;
+    max-width: 100%;
+}
+
+.katex-display {
+    margin: 0.9em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.15em 0;
+}
+
+.mermaid-rendered {
+    margin: 0.9em 0;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.mermaid-rendered svg {
+    display: block;
+    height: auto;
+    max-width: 100%;
+}
+
+.mermaid-error {
+    background: var(--rhizome-surface);
+    border: 1px solid var(--rhizome-border);
+    border-radius: 6px;
+    color: var(--rhizome-secondary);
+    padding: 10px 12px;
+}
+
+.mermaid-error-title {
+    color: var(--rhizome-text);
+    font-weight: 650;
+    margin-bottom: 0.45em;
+}
+
+.mermaid-error pre {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    white-space: pre-wrap;
+}
+
+blockquote.callout {
+    background: var(--rhizome-surface);
+    border: 1px solid var(--rhizome-border);
+    border-left: 3px solid var(--rhizome-accent);
+    border-radius: 6px;
+    color: var(--rhizome-text);
+    padding: 9px 11px;
+}
+
+.callout-title {
+    color: var(--rhizome-text);
+    font-weight: 650;
+    margin-bottom: 0.45em;
+    text-transform: capitalize;
+}
+
+blockquote.callout > *:last-child {
+    margin-bottom: 0;
+}
+
+hr {
+    border: 0;
+    border-top: 1px solid var(--rhizome-border);
+    margin: 1em 0;
+}

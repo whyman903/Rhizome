@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 import os
 import posixpath
@@ -23,6 +23,17 @@ from compile.page_types import (
 )
 
 
+_STRONG_LOCATOR_REASONS = frozenset({
+    "exact-title",
+    "exact-alias",
+    "title-match",
+    "alias-match",
+    "path-match",
+})
+
+_NAV_DOWNRANK_EXEMPT_REASONS = _STRONG_LOCATOR_REASONS | {"summary-match"}
+
+
 IGNORED_DIRS = {
     ".compile",
     ".git",
@@ -32,6 +43,7 @@ IGNORED_DIRS = {
     "__pycache__",
     "build",
     "dist",
+    "evals",
     "node_modules",
 }
 
@@ -217,12 +229,7 @@ class VaultIssue:
     pages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "code": self.code,
-            "severity": self.severity,
-            "message": self.message,
-            "pages": self.pages,
-        }
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
 @dataclass
@@ -258,37 +265,10 @@ class VaultReport:
     pages: list[VaultPage]
 
     def to_dict(self, include_body: bool = False) -> dict[str, Any]:
-        return {
-            "root": self.root,
-            "page_root": self.page_root,
-            "layout": self.layout,
-            "obsidian_enabled": self.obsidian_enabled,
-            "obsidian_files": self.obsidian_files,
-            "total_pages": self.total_pages,
-            "page_type_counts": self.page_type_counts,
-            "pages_with_frontmatter": self.pages_with_frontmatter,
-            "pages_without_frontmatter": self.pages_without_frontmatter,
-            "pages_with_wikilinks": self.pages_with_wikilinks,
-            "pages_without_wikilinks": self.pages_without_wikilinks,
-            "total_outbound_links": self.total_outbound_links,
-            "resolved_link_count": self.resolved_link_count,
-            "resolved_file_link_count": self.resolved_file_link_count,
-            "unresolved_link_count": self.unresolved_link_count,
-            "orphan_page_count": self.orphan_page_count,
-            "duplicate_titles": self.duplicate_titles,
-            "thin_pages": self.thin_pages,
-            "knowledge_page_count": self.knowledge_page_count,
-            "knowledge_pages_with_non_nav_inbound": self.knowledge_pages_with_non_nav_inbound,
-            "navigation_bottlenecks": self.navigation_bottlenecks,
-            "raw_file_count": self.raw_file_count,
-            "raw_files_without_source_notes": self.raw_files_without_source_notes,
-            "source_pages_without_raw_links": self.source_pages_without_raw_links,
-            "auxiliary_markdown_files": self.auxiliary_markdown_files,
-            "empty_markdown_files": self.empty_markdown_files,
-            "stale_navigation_pages": self.stale_navigation_pages,
-            "issues": [issue.to_dict() for issue in self.issues],
-            "pages": [page.to_dict(include_body=include_body) for page in self.pages],
-        }
+        payload = {f.name: getattr(self, f.name) for f in fields(self) if f.name not in {"issues", "pages"}}
+        payload["issues"] = [issue.to_dict() for issue in self.issues]
+        payload["pages"] = [page.to_dict(include_body=include_body) for page in self.pages]
+        return payload
 
 
 @dataclass
@@ -302,15 +282,7 @@ class SearchHit:
     snippet: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "title": self.title,
-            "relative_path": self.relative_path,
-            "page_type": self.page_type,
-            "summary": self.summary,
-            "score": self.score,
-            "reasons": self.reasons,
-            "snippet": self.snippet,
-        }
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
 @dataclass
@@ -326,14 +298,8 @@ class PageNeighborhood:
 
     def to_dict(self, include_body: bool = False) -> dict[str, Any]:
         return {
-            "page": self.page.to_dict(include_body=include_body),
-            "backlinks": self.backlinks,
-            "outbound_pages": self.outbound_pages,
-            "outbound_files": self.outbound_files,
-            "supporting_source_pages": self.supporting_source_pages,
-            "related_pages": self.related_pages,
-            "cited_source_pages": self.cited_source_pages,
-            "unresolved_targets": self.unresolved_targets,
+            f.name: self.page.to_dict(include_body=include_body) if f.name == "page" else getattr(self, f.name)
+            for f in fields(self)
         }
 
 
@@ -347,14 +313,7 @@ class GraphNode:
     unresolved_count: int
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "title": self.title,
-            "relative_path": self.relative_path,
-            "page_type": self.page_type,
-            "inbound_count": self.inbound_count,
-            "outbound_count": self.outbound_count,
-            "unresolved_count": self.unresolved_count,
-        }
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
 @dataclass
@@ -364,11 +323,7 @@ class GraphEdge:
     target_kind: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "source": self.source,
-            "target": self.target,
-            "target_kind": self.target_kind,
-        }
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
 @dataclass
@@ -1048,8 +1003,7 @@ class ObsidianConnector:
     def _is_high_confidence_locator_hit(self, hit: SearchHit) -> bool:
         if hit.score < 70:
             return False
-        strong_reasons = {"exact-title", "exact-alias", "title-match", "alias-match", "path-match"}
-        return any(reason in strong_reasons for reason in hit.reasons)
+        return any(reason in _STRONG_LOCATOR_REASONS for reason in hit.reasons)
 
     def _is_competing_locator_hit(self, top_hit: SearchHit, next_hit: SearchHit) -> bool:
         if next_hit.score <= 0:
@@ -1114,6 +1068,12 @@ class ObsidianConnector:
             if all(term in page.summary_terms or term in page.body_lower for term in query_terms):
                 score += 12
                 reasons.append("all-terms")
+
+        if page.page_type in NAV_PAGE_TYPES and not any(
+            reason in _NAV_DOWNRANK_EXEMPT_REASONS for reason in reasons
+        ):
+            score = max(1, int(score * 0.4))
+            reasons.append("nav-downranked")
 
         # Reward pages with a meaningful graph footprint when scores tie.
         score += min(len(page.resolved_outbound_links) + len(page.inbound_links), 6)

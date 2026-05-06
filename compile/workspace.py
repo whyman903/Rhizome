@@ -40,8 +40,9 @@ def init_workspace(root: Path, topic: str, description: str = "") -> Config:
     save_config(config)
     _save_state(config, {"processed": {}, "created_at": now_machine()})
 
-    _write_initial_index(config)
-    _write_initial_overview(config)
+    empty_pages: dict[str, list[dict[str, str]]] = {"articles": [], "sources": [], "maps": [], "outputs": [], "other": []}
+    write_index(config, empty_pages)
+    write_overview(config, empty_pages)
     _write_initial_log(config)
     _write_initial_schema(config)
     _setup_obsidian(root)
@@ -297,14 +298,6 @@ def _bucket_for_page(page_type: str, page_path: str) -> str:
     if t in OUTPUT_PAGE_TYPES or page_path.startswith("outputs/"):
         return "outputs"
     return "other"
-
-
-def _write_initial_index(config: Config) -> None:
-    write_index(config, {"articles": [], "sources": [], "maps": [], "outputs": [], "other": []})
-
-
-def _write_initial_overview(config: Config) -> None:
-    write_overview(config, {"articles": [], "sources": [], "maps": [], "outputs": [], "other": []})
 
 
 def _write_initial_log(config: Config) -> None:
