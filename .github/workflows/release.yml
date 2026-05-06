@@ -25,7 +25,7 @@ jobs:
         run: uv sync
 
       - name: Build Rhizome.app
-        run: ./scripts/build-rhizome-app.sh
+        run: ./scripts/build.sh
 
       - name: Zip Rhizome.app
         run: |
@@ -45,11 +45,25 @@ jobs:
           files: artifacts/Rhizome.app.zip
           generate_release_notes: true
           body: |
-            Download `Rhizome.app.zip`, unzip, and drag Rhizome.app to /Applications.
+            ## Before you install
 
-            The build is ad-hoc signed (not notarized). On first launch you may need to clear the quarantine flag:
+            Rhizome needs **two things on your Mac before it will work**. Both are required.
 
-            ```
-            xattr -dr com.apple.quarantine /Applications/Rhizome.app
-            open /Applications/Rhizome.app
-            ```
+            1. **Obsidian** — download from https://obsidian.md and launch it once.
+            2. **Claude Code** — install and sign in:
+               ```
+               npm i -g @anthropic-ai/claude-code
+               claude          # complete the sign-in flow once, then quit
+               ```
+
+            ## Install Rhizome.app
+
+            1. Download `Rhizome.app.zip` below, unzip, and drag `Rhizome.app` to `/Applications`.
+            2. The build is ad-hoc signed (not notarized). On first launch, clear the quarantine flag:
+               ```
+               xattr -dr com.apple.quarantine /Applications/Rhizome.app
+               open /Applications/Rhizome.app
+               ```
+            3. Look for the Rhizome icon in your menu bar (top-right).
+
+            On first launch, Rhizome creates a default workspace at `~/wiki`. See the [README](https://github.com/${{ github.repository }}#your-first-5-minutes) for the first-5-minutes walkthrough.

@@ -37,7 +37,7 @@ final class SidecarIntegrationTests: XCTestCase {
             .appending(path: "Resources", directoryHint: .isDirectory)
             .appending(path: "compile-bin", directoryHint: .notDirectory)
         guard FileManager.default.isExecutableFile(atPath: bundled.path) else {
-            throw XCTSkip("Bundled compile-bin not found at \(bundled.path). Run scripts/build-rhizome-app.sh first.")
+            throw XCTSkip("Bundled compile-bin not found at \(bundled.path). Run scripts/build.sh first.")
         }
         return bundled
     }

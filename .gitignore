@@ -50,3 +50,6 @@ xcuserdata/
 
 # Local evaluation scratch space
 evals/
+presentation/
+*.pdf
+*.tex
