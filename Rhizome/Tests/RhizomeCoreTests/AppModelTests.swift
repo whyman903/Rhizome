@@ -237,6 +237,33 @@ private final class DelayedQueryRunner: ClaudeQueryRunning, @unchecked Sendable 
     }
 }
 
+private final class DelayedSuccessfulQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
+    let delayNanoseconds: UInt64
+    let answer: String
+
+    init(delayNanoseconds: UInt64 = 100_000_000, answer: String = "background answer") {
+        self.delayNanoseconds = delayNanoseconds
+        self.answer = answer
+    }
+
+    func runQuery(
+        prompt: String,
+        workspaceURL: URL,
+        resumeSessionID: String?,
+        onEvent: @escaping @Sendable (ClaudeQueryEvent) async -> Void
+    ) async throws {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        await onEvent(.toolCall(name: "Grep", input: [:]))
+        await onEvent(.finished(
+            text: answer,
+            costUSD: nil,
+            durationMs: nil,
+            permissionDenials: [],
+            sessionID: "background-session"
+        ))
+    }
+}
+
 private final class DynamicCompileRunner: CompileRunning, @unchecked Sendable {
     var pageResult: WikiPage
     private(set) var requestedPageLocators: [String] = []
@@ -1708,6 +1735,94 @@ final class AppModelTests: XCTestCase {
         model.selectHistorySession(newerRecord)
 
         XCTAssertEqual(model.queryHistory.map(\.id), [newerRecord.id, olderRecord.id])
+    }
+
+    func testSelectingAnotherHistorySessionDoesNotCancelInFlightQuery() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-background-query-save", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let existingRecord = QueryHistoryRecord(
+            id: UUID(),
+            turns: [QueryTurn(question: "Existing question", answer: "Existing answer")],
+            archivedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        try writeHistory([existingRecord], to: workspaceURL)
+
+        let model = AppModel(
+            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
+            dispatcher: NoopDispatcher(),
+            queryRunner: DelayedSuccessfulQueryRunner(
+                delayNanoseconds: 300_000_000,
+                answer: "background answer"
+            ),
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-background-query-save", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.sendQuery("Background question?")
+        let backgroundSessionID = model.querySession.id
+        XCTAssertEqual(model.querySession.status, .running)
+
+        model.selectHistorySession(existingRecord)
+        XCTAssertEqual(model.querySession.id, existingRecord.id)
+        XCTAssertEqual(model.sidebarPendingQuerySessions.map(\.id), [backgroundSessionID])
+
+        await waitUntil(timeout: 2.0) {
+            model.queryHistory.contains {
+                $0.id == backgroundSessionID
+                    && $0.turns.first?.question == "Background question?"
+                    && $0.turns.first?.answer == "background answer"
+            }
+        }
+
+        XCTAssertEqual(model.querySession.id, existingRecord.id)
+        XCTAssertTrue(model.sidebarPendingQuerySessions.isEmpty)
+        XCTAssertEqual(model.queryHistory.first?.id, backgroundSessionID)
+
+        let historyURL = workspaceURL.appending(path: ".compile/query-history.json", directoryHint: .notDirectory)
+        let savedData = try Data(contentsOf: historyURL)
+        let savedRecords = try JSONDecoder().decode([QueryHistoryRecord].self, from: savedData)
+        XCTAssertTrue(savedRecords.contains { $0.id == backgroundSessionID })
+    }
+
+    func testPendingQuerySessionCanBeReopenedFromSidebar() async throws {
+        let workspaceURL = tempDirectory.appending(path: "wiki-pending-query-reopen", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let model = AppModel(
+            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
+            dispatcher: NoopDispatcher(),
+            queryRunner: DelayedQueryRunner(delayNanoseconds: 1_000_000_000),
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-pending-query-reopen", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            openWorkspaceHandler: { _ in .opened },
+            openNoteHandler: { _, _ in .opened },
+            openGraphHandler: { _ in .opened }
+        )
+
+        await model.bootstrapIfNeeded()
+        model.sendQuery("Still pending?")
+        let pendingSessionID = model.querySession.id
+
+        model.startNewQuery()
+        XCTAssertEqual(model.sidebarPendingQuerySessions.map(\.id), [pendingSessionID])
+
+        let pendingSession = try XCTUnwrap(model.sidebarPendingQuerySessions.first)
+        model.selectPendingQuerySession(pendingSession)
+
+        XCTAssertEqual(model.querySession.id, pendingSessionID)
+        XCTAssertEqual(model.querySession.status, .running)
+        XCTAssertTrue(model.sidebarPendingQuerySessions.isEmpty)
+
+        model.cancelQuery()
     }
 
     func testFollowUpFromSelectedHistorySessionMovesRecordToTop() async throws {

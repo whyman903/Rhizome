@@ -8,7 +8,8 @@ struct QueryDetailView: View {
     @AppStorage("RhizomeSidebarVisible") private var sidebarVisible = false
     @State private var showSettings = false
     @State private var showingDeleted = false
-    @FocusState private var isInputFocused: Bool
+    @State private var isInputFocused: Bool = false
+    @State private var composerHeight: CGFloat = 17
 
     private let minSidebarWidth: CGFloat = 140
     private let defaultSidebarWidth: CGFloat = 260
@@ -130,6 +131,7 @@ struct QueryDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .background(EditorialPalette.background)
+            .overlayScrollers()
             .onChange(of: model.querySession.turns.count) {
                 withAnimation {
                     proxy.scrollTo("bottom", anchor: .bottom)
@@ -142,12 +144,16 @@ struct QueryDetailView: View {
     }
 
     private func turnView(_ turn: QueryTurn) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             questionHeader(turn.question)
             MarkdownContentView(text: turn.answer, workspaceURL: model.workspace?.url) { target in
                 model.openWikiPage(target: target)
             }
             .padding(.leading, 15)
+            if !turn.answer.isEmpty {
+                CopyMarkdownButton(text: turn.answer)
+                    .padding(.leading, 11)
+            }
         }
     }
 
@@ -223,18 +229,18 @@ struct QueryDetailView: View {
     }
 
     private var followUpBar: some View {
-        HStack(spacing: 10) {
-            TextField(
-                model.querySession.turns.isEmpty ? "Ask the wiki…" : "Ask a follow-up…",
+        ZStack(alignment: .bottomTrailing) {
+            ChatComposer(
                 text: $followUpText,
-                axis: .vertical
+                contentHeight: $composerHeight,
+                isFocused: $isInputFocused,
+                placeholder: model.querySession.turns.isEmpty ? "Ask the wiki…" : "Ask a follow-up…",
+                font: composerNSFont,
+                textColor: NSColor(EditorialPalette.textPrimary),
+                placeholderColor: NSColor(EditorialPalette.textTertiary),
+                onSubmit: submitFollowUp
             )
-            .textFieldStyle(.plain)
-            .font(.system(size: 13, design: activeFont.design))
-            .foregroundStyle(EditorialPalette.textPrimary)
-            .focused($isInputFocused)
-            .lineLimit(1...4)
-            .onSubmit { submitFollowUp() }
+            .frame(height: clampedComposerHeight)
 
             Button(action: submitFollowUp) {
                 Image(systemName: "arrow.up.circle.fill")
@@ -246,6 +252,7 @@ struct QueryDetailView: View {
             .buttonStyle(.plain)
             .disabled(followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .keyboardShortcut(.return, modifiers: .command)
+            .padding(.trailing, 16)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -257,6 +264,20 @@ struct QueryDetailView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(EditorialPalette.border, lineWidth: 1)
         )
+    }
+
+    private var composerNSFont: NSFont {
+        activeFont.nsFont(size: 13)
+    }
+
+    private var composerLineHeight: CGFloat {
+        NSLayoutManager().defaultLineHeight(for: composerNSFont)
+    }
+
+    private var clampedComposerHeight: CGFloat {
+        let line = composerLineHeight
+        let maxHeight = line * 18
+        return Swift.min(Swift.max(composerHeight, line), maxHeight)
     }
 
     private func submitFollowUp() {
@@ -306,7 +327,9 @@ struct QueryDetailView: View {
     }
 
     private var hasAnySessions: Bool {
-        model.hasActiveQuerySession || !model.sidebarQueryHistory.isEmpty
+        model.hasActiveQuerySession
+            || !model.sidebarPendingQuerySessions.isEmpty
+            || !model.sidebarQueryHistory.isEmpty
     }
 
     // MARK: - History sidebar
@@ -347,6 +370,17 @@ struct QueryDetailView: View {
                                 }
                             )
                         }
+                        ForEach(model.sidebarPendingQuerySessions) { session in
+                            sidebarRow(
+                                label: session.firstQuestion,
+                                isActive: session.id == model.querySession.id,
+                                action: {
+                                    model.selectPendingQuerySession(session)
+                                    followUpText = ""
+                                    showSettings = false
+                                }
+                            )
+                        }
                         ForEach(model.sidebarQueryHistory) { record in
                             sidebarRow(
                                 label: record.firstQuestion,
@@ -364,6 +398,7 @@ struct QueryDetailView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .overlayScrollers()
             }
         }
     }
@@ -408,6 +443,7 @@ struct QueryDetailView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .overlayScrollers()
             }
         }
     }
@@ -1010,6 +1046,55 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
 
         init(hasAutosavedSidebarWidth: Bool) {
             self.hasAutosavedSidebarWidth = hasAutosavedSidebarWidth
+        }
+    }
+}
+
+private struct CopyMarkdownButton: View {
+    let text: String
+
+    @State private var isHovering = false
+    @State private var copied = false
+
+    var body: some View {
+        Button(action: copy) {
+            HStack(spacing: 4) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11, weight: .medium))
+                Text(copied ? "Copied" : "Copy")
+                    .font(.system(size: 11, design: activeFont.design))
+            }
+            .foregroundStyle(iconColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(isHovering ? EditorialPalette.surface : Color.clear)
+            )
+            .contentShape(Rectangle())
+            .opacity(copied ? 1 : (isHovering ? 1 : 0.55))
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .animation(.easeOut(duration: 0.15), value: copied)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Copy markdown")
+    }
+
+    private var iconColor: Color {
+        if copied { return EditorialPalette.accent }
+        if isHovering { return EditorialPalette.textPrimary }
+        return EditorialPalette.textTertiary
+    }
+
+    private func copy() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        copied = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copied = false
         }
     }
 }

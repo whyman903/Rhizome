@@ -17,6 +17,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(EditorialPalette.background)
+        .overlayScrollers()
     }
 
     // MARK: - Theme

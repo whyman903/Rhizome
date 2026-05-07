@@ -46,6 +46,7 @@ public final class AppModel {
     public private(set) var recentWorkspacePaths: [String] = []
     public let feedStore: FeedStore
     public private(set) var querySession = QuerySession()
+    public private(set) var backgroundQuerySessions: [QuerySession] = []
     public private(set) var queryHistory: [QueryHistoryRecord] = []
     public private(set) var deletedQueryHistory: [QueryHistoryRecord] = []
     public var hasActiveQuerySession: Bool {
@@ -54,8 +55,12 @@ public final class AppModel {
     public var hasUnsavedActiveQuerySession: Bool {
         hasActiveQuerySession && !queryHistory.contains { $0.id == querySession.id }
     }
+    public var sidebarPendingQuerySessions: [QuerySession] {
+        backgroundQuerySessions
+    }
     public var sidebarQueryHistory: [QueryHistoryRecord] {
-        queryHistory
+        let pendingIDs = Set(backgroundQuerySessions.map(\.id))
+        return queryHistory.filter { !pendingIDs.contains($0.id) }
     }
     public var sidebarDeletedQueryHistory: [QueryHistoryRecord] {
         deletedQueryHistory
@@ -95,7 +100,11 @@ public final class AppModel {
     private let deletedQueryHistoryRetention: TimeInterval = 60 * 60 * 24 * 30
     private var didBootstrap = false
     private var toastClearTask: Task<Void, Never>?
-    private var activeQueryTask: Task<Void, Never>?
+    private struct ActiveQueryTask {
+        let runID: UUID
+        let task: Task<Void, Never>
+    }
+    private var activeQueryTasks: [UUID: ActiveQueryTask] = [:]
 
     public init(
         runner: CompileRunning? = nil,
@@ -202,7 +211,7 @@ public final class AppModel {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        activeQueryTask?.cancel()
+        parkActiveQuerySessionIfNeeded()
         archiveSessionIfNeeded()
         querySession = QuerySession()
         querySession.start(question: trimmed)
@@ -210,10 +219,12 @@ public final class AppModel {
 
         let workspaceURL = workspace.url
         let session = querySession
+        let sessionID = session.id
+        let runID = UUID()
         let claudeRunner = queryRunner
         let log = logger
 
-        activeQueryTask = Task { [weak self] in
+        let task = Task { [weak self] in
             log.log("sendQuery: starting query — \"\(trimmed.prefix(60))\"")
 
             await MainActor.run { session.updateStatusDetail("Asking Claude…") }
@@ -249,7 +260,7 @@ public final class AppModel {
                     if session.status == .failed, let feedItemID {
                         self?.feedStore.markFailed(id: feedItemID, message: session.errorMessage ?? "Query completed without a final response")
                     }
-                    self?.saveCurrentSession()
+                    self?.saveSession(session, workspaceURL: workspaceURL)
                 }
             } catch is CancellationError {
                 await MainActor.run { session.cancel() }
@@ -262,20 +273,19 @@ public final class AppModel {
                 }
             }
             await MainActor.run { [weak self] in
-                self?.activeQueryTask = nil
+                self?.clearQueryTask(for: sessionID, runID: runID)
             }
         }
+        activeQueryTasks[sessionID] = ActiveQueryTask(runID: runID, task: task)
     }
 
     public func cancelQuery() {
-        activeQueryTask?.cancel()
-        activeQueryTask = nil
+        cancelQueryTask(for: querySession.id)
         querySession.cancel()
     }
 
     public func dismissQueryResponse() {
-        activeQueryTask?.cancel()
-        activeQueryTask = nil
+        cancelQueryTask(for: querySession.id)
         querySession = QuerySession()
     }
 
@@ -289,17 +299,19 @@ public final class AppModel {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        activeQueryTask?.cancel()
+        cancelQueryTask(for: querySession.id)
         querySession.startFollowUp(question: trimmed)
 
         let workspaceURL = workspace.url
         let session = querySession
+        let sessionID = session.id
+        let runID = UUID()
         let claudeRunner = queryRunner
         let log = logger
         let resumeSessionID = session.claudeSessionID
         let priorTurns = session.turns
 
-        activeQueryTask = Task { [weak self] in
+        let task = Task { [weak self] in
             log.log("sendFollowUp: follow-up — \"\(trimmed.prefix(60))\"")
             if resumeSessionID == nil {
                 log.log("sendFollowUp: no Claude session id available; starting a fresh agent context")
@@ -372,7 +384,7 @@ public final class AppModel {
                 }
                 await MainActor.run { [weak self] in
                     Self.finishCompletedClaudeRunIfNeeded(session, logger: log, context: "sendFollowUp")
-                    self?.saveCurrentSession()
+                    self?.saveSession(session, workspaceURL: workspaceURL)
                 }
             } catch is CancellationError {
                 await MainActor.run { session.cancel() }
@@ -382,9 +394,10 @@ public final class AppModel {
                 }
             }
             await MainActor.run { [weak self] in
-                self?.activeQueryTask = nil
+                self?.clearQueryTask(for: sessionID, runID: runID)
             }
         }
+        activeQueryTasks[sessionID] = ActiveQueryTask(runID: runID, task: task)
     }
 
     nonisolated private static func followUpPromptWithPriorResearchHint(
@@ -436,17 +449,22 @@ public final class AppModel {
     }
 
     public func selectHistorySession(_ record: QueryHistoryRecord) {
-        activeQueryTask?.cancel()
-        activeQueryTask = nil
+        parkActiveQuerySessionIfNeeded()
         archiveSessionIfNeeded()
         let session = QuerySession(id: record.id)
         session.restore(turns: record.turns, claudeSessionID: record.claudeSessionID)
         querySession = session
     }
 
+    public func selectPendingQuerySession(_ session: QuerySession) {
+        parkActiveQuerySessionIfNeeded()
+        archiveSessionIfNeeded()
+        removeBackgroundQuerySession(id: session.id)
+        querySession = session
+    }
+
     public func startNewQuery() {
-        activeQueryTask?.cancel()
-        activeQueryTask = nil
+        parkActiveQuerySessionIfNeeded()
         archiveSessionIfNeeded()
         querySession = QuerySession()
     }
@@ -469,8 +487,7 @@ public final class AppModel {
         saveHistory()
         saveDeletedHistory()
         if isActive {
-            activeQueryTask?.cancel()
-            activeQueryTask = nil
+            cancelQueryTask(for: querySession.id)
             querySession = QuerySession()
         }
     }
@@ -504,30 +521,71 @@ public final class AppModel {
         saveDeletedHistory()
     }
 
-    /// Persist the current session into history immediately (called after each completed query).
-    private func saveCurrentSession() {
-        persistCurrentSession(moveToTop: true)
+    private func saveSession(_ session: QuerySession, workspaceURL: URL) {
+        guard isCurrentWorkspace(workspaceURL) else { return }
+        persistSession(session, moveToTop: true)
+        removeBackgroundQuerySession(id: session.id)
+        if querySession.id == session.id && querySession !== session {
+            querySession.restore(turns: session.turns, claudeSessionID: session.claudeSessionID)
+        }
     }
 
     private func archiveSessionIfNeeded() {
-        persistCurrentSession(moveToTop: false)
+        persistSession(querySession, moveToTop: false)
     }
 
-    private func persistCurrentSession(moveToTop: Bool) {
-        guard !querySession.turns.isEmpty else { return }
-        let existingRecord = queryHistory.first { $0.id == querySession.id }
+    private func persistSession(_ session: QuerySession, moveToTop: Bool) {
+        guard !session.turns.isEmpty else { return }
+        let existingRecord = queryHistory.first { $0.id == session.id }
         let archivedAt = moveToTop
             ? Date()
             : existingRecord?.archivedAt ?? Date()
         let record = QueryHistoryRecord(
-            id: querySession.id,
-            turns: querySession.turns,
-            claudeSessionID: querySession.claudeSessionID,
+            id: session.id,
+            turns: session.turns,
+            claudeSessionID: session.claudeSessionID,
             archivedAt: archivedAt
         )
 
         guard existingRecord != record else { return }
         upsertHistoryRecord(record)
+    }
+
+    private func parkActiveQuerySessionIfNeeded() {
+        let session = querySession
+        guard session.status == .running,
+              activeQueryTasks[session.id] != nil,
+              !backgroundQuerySessions.contains(where: { $0.id == session.id }) else {
+            return
+        }
+        backgroundQuerySessions.insert(session, at: 0)
+    }
+
+    private func removeBackgroundQuerySession(id: UUID) {
+        backgroundQuerySessions.removeAll { $0.id == id }
+    }
+
+    private func cancelQueryTask(for sessionID: UUID) {
+        activeQueryTasks.removeValue(forKey: sessionID)?.task.cancel()
+    }
+
+    private func clearQueryTask(for sessionID: UUID, runID: UUID) {
+        guard activeQueryTasks[sessionID]?.runID == runID else { return }
+        activeQueryTasks.removeValue(forKey: sessionID)
+    }
+
+    private func cancelAllQueryTasks() {
+        for activeTask in activeQueryTasks.values {
+            activeTask.task.cancel()
+        }
+        activeQueryTasks = [:]
+        backgroundQuerySessions = []
+    }
+
+    private func isCurrentWorkspace(_ url: URL) -> Bool {
+        guard let workspace else { return false }
+        return workspace.url.resolvingSymlinksInPath().standardizedFileURL.path
+            == url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     private var historyFileURL: URL? {
@@ -1407,8 +1465,7 @@ public final class AppModel {
     }
 
     private func setWorkspace(_ info: WorkspaceInfo) {
-        activeQueryTask?.cancel()
-        activeQueryTask = nil
+        cancelAllQueryTasks()
         workspace = info
         querySession = QuerySession()
         queryHistory = []
