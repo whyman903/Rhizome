@@ -142,34 +142,48 @@ struct QueryDetailView: View {
 
     private var conversationArea: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(model.querySession.turns) { turn in
-                        turnView(turn)
-                    }
+            ZStack {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        ForEach(model.querySession.turns) { turn in
+                            turnView(turn)
+                        }
 
-                    if model.querySession.status == .running || model.querySession.status == .failed {
-                        activeTurnView
-                    }
+                        if model.querySession.status == .running || model.querySession.status == .failed {
+                            activeTurnView
+                        }
 
-                    Color.clear.frame(height: 1).id("bottom")
+                        Color.clear.frame(height: 1).id("bottom")
+                    }
+                    .frame(maxWidth: 780, alignment: .leading)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .frame(maxWidth: 780, alignment: .leading)
-                .padding(.horizontal, 28)
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .background(EditorialPalette.background)
-            .overlayScrollers()
-            .onChange(of: model.querySession.turns.count) {
-                withAnimation {
+                .overlayScrollers()
+                .onChange(of: model.querySession.turns.count) {
+                    withAnimation {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: model.querySession.assistantText) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
+
+                if isEmptyConversation {
+                    RhizomeLogo(color: EditorialPalette.textTertiary)
+                        .frame(width: 140, height: 140)
+                        .allowsHitTesting(false)
+                }
             }
-            .onChange(of: model.querySession.assistantText) {
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
+            .background(EditorialPalette.background)
         }
+    }
+
+    private var isEmptyConversation: Bool {
+        model.querySession.turns.isEmpty
+            && model.querySession.status != .running
+            && model.querySession.status != .failed
     }
 
     private func turnView(_ turn: QueryTurn) -> some View {
@@ -667,6 +681,108 @@ private struct SidebarHistoryRow: View {
                 }
             }
         }
+    }
+}
+
+private struct RhizomeLogo: View {
+    let color: Color
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let nodes: [(x: CGFloat, y: CGFloat, radius: CGFloat)] = [
+        (380, 380, 74),
+        (640, 540, 60),
+        (200, 220, 42),
+        (600, 280, 42),
+        (280, 600, 42),
+        (820, 420, 42),
+        (780, 780, 42),
+        (500, 800, 42),
+    ]
+    private let edges: [(Int, Int)] = [
+        (0, 2), (0, 3), (0, 4), (0, 1),
+        (1, 5), (1, 6), (1, 7),
+        (4, 7), (3, 5),
+    ]
+    private let pulseOrder = [2, 0, 3, 5, 1, 6, 7, 4]
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+            Canvas { context, size in
+                drawGraph(
+                    in: &context,
+                    size: size,
+                    elapsed: reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func drawGraph(in context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {
+        let scale = min(size.width, size.height) / 1024
+        let xOffset = (size.width - 1024 * scale) / 2
+        let yOffset = (size.height - 1024 * scale) / 2
+        let edgeWidth = max(1.4, 40 * scale)
+
+        for (a, b) in edges {
+            var path = Path()
+            path.move(to: CGPoint(x: xOffset + nodes[a].x * scale, y: yOffset + nodes[a].y * scale))
+            path.addLine(to: CGPoint(x: xOffset + nodes[b].x * scale, y: yOffset + nodes[b].y * scale))
+            let activity = max(pulseAmount(for: a, elapsed: elapsed), pulseAmount(for: b, elapsed: elapsed))
+            context.stroke(
+                path,
+                with: .color(color.opacity(0.45 + activity * 0.25)),
+                style: StrokeStyle(lineWidth: edgeWidth, lineCap: .round)
+            )
+        }
+
+        for (index, node) in nodes.enumerated() {
+            let activity = pulseAmount(for: index, elapsed: elapsed)
+            let center = CGPoint(x: xOffset + node.x * scale, y: yOffset + node.y * scale)
+            let radius = max(2.0, node.radius * scale)
+            let nodeRect = CGRect(
+                x: center.x - radius,
+                y: center.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
+
+            var nodeContext = context
+            if activity > 0.02 {
+                nodeContext.addFilter(.shadow(
+                    color: color.opacity(activity * 0.85),
+                    radius: radius * 0.9,
+                    x: 0,
+                    y: 0
+                ))
+            }
+            nodeContext.fill(
+                Path(ellipseIn: nodeRect),
+                with: .color(color)
+            )
+        }
+    }
+
+    private func pulseAmount(for nodeIndex: Int, elapsed: TimeInterval) -> Double {
+        guard let orderIndex = pulseOrder.firstIndex(of: nodeIndex) else {
+            return 0
+        }
+
+        let stepDuration = 0.85
+        let cycleDuration = stepDuration * Double(pulseOrder.count)
+        let nodeTime = Double(orderIndex) * stepDuration
+        let age = (elapsed - nodeTime).truncatingRemainder(dividingBy: cycleDuration)
+        let normalizedAge = age >= 0 ? age : age + cycleDuration
+
+        let pulseWindow = 1.7
+        guard normalizedAge < pulseWindow else {
+            return 0
+        }
+
+        let attack = min(normalizedAge / 0.45, 1)
+        let fade = max(0, 1 - ((normalizedAge - 0.45) / (pulseWindow - 0.45)))
+        return max(0, min(1, attack * fade))
     }
 }
 

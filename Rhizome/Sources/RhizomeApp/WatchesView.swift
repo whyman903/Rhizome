@@ -273,7 +273,10 @@ struct WatchesView: View {
     @ViewBuilder
     private var content: some View {
         if viewModel.watches.isEmpty {
-            if !showAddForm {
+            if viewModel.isLoading {
+                loadingState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !showAddForm {
                 emptyState
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -294,6 +297,17 @@ struct WatchesView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
             }
+        }
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(EditorialPalette.accent)
+            Text("Loading watches…")
+                .font(.system(size: 11.5, design: activeFont.design).italic())
+                .foregroundStyle(EditorialPalette.textTertiary)
         }
     }
 
