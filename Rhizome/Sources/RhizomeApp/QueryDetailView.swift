@@ -7,6 +7,7 @@ struct QueryDetailView: View {
     @State private var followUpText = ""
     @AppStorage("RhizomeSidebarVisible") private var sidebarVisible = false
     @State private var showSettings = false
+    @State private var showingDeleted = false
     @FocusState private var isInputFocused: Bool
 
     private let minSidebarWidth: CGFloat = 140
@@ -312,14 +313,21 @@ struct QueryDetailView: View {
 
     private var historySidebar: some View {
         VStack(spacing: 0) {
-            Text("HISTORY")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.3)
-                .foregroundStyle(EditorialPalette.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
+            if showingDeleted {
+                deletedSidebarContent
+            } else {
+                historySidebarContent
+            }
+
+            sidebarFooter
+        }
+        .background(EditorialPalette.backgroundTop)
+    }
+
+    private var historySidebarContent: some View {
+        VStack(spacing: 0) {
+            sidebarSectionHeader("HISTORY")
                 .padding(.top, 14)
-                .padding(.bottom, 8)
 
             if !hasAnySessions {
                 Spacer()
@@ -330,7 +338,6 @@ struct QueryDetailView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        // Unsaved or in-flight sessions do not have a history row yet.
                         if model.hasUnsavedActiveQuerySession {
                             sidebarRow(
                                 label: model.querySession.firstQuestion,
@@ -340,7 +347,6 @@ struct QueryDetailView: View {
                                 }
                             )
                         }
-                        // Archived history
                         ForEach(model.sidebarQueryHistory) { record in
                             sidebarRow(
                                 label: record.firstQuestion,
@@ -349,6 +355,9 @@ struct QueryDetailView: View {
                                     model.selectHistorySession(record)
                                     followUpText = ""
                                     showSettings = false
+                                },
+                                onDelete: {
+                                    model.deleteHistorySession(record)
                                 }
                             )
                         }
@@ -357,29 +366,232 @@ struct QueryDetailView: View {
                 }
             }
         }
-        .background(EditorialPalette.backgroundTop)
     }
 
-    private func sidebarRow(label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 12, design: activeFont.design))
-                .foregroundStyle(isActive
-                                 ? EditorialPalette.textPrimary
-                                 : EditorialPalette.textSecondary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(
-                    isActive
-                        ? RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(EditorialPalette.surface)
-                        : nil
-                )
+    private var deletedSidebarContent: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button(action: { showingDeleted = false }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(EditorialPalette.textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Back to history")
+
+                Text("RECENTLY DELETED")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.3)
+                    .foregroundStyle(EditorialPalette.textTertiary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+
+            if model.sidebarDeletedQueryHistory.isEmpty {
+                Spacer()
+                Text("Nothing recently deleted")
+                    .font(.system(size: 12, design: activeFont.design).italic())
+                    .foregroundStyle(EditorialPalette.textTertiary)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.sidebarDeletedQueryHistory) { record in
+                            deletedSidebarRow(record: record)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
         }
-        .buttonStyle(.plain)
+    }
+
+    private var sidebarFooter: some View {
+        HStack(spacing: 0) {
+            if showingDeleted {
+                if !model.sidebarDeletedQueryHistory.isEmpty {
+                    Button(action: { model.emptyDeletedHistory() }) {
+                        Text("Empty")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(EditorialPalette.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Permanently delete everything in Recently Deleted")
+                }
+                Spacer()
+            } else {
+                Spacer()
+                Button(action: { showingDeleted = true }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(EditorialPalette.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Recently Deleted")
+            }
+        }
+        .frame(height: 32)
+        .padding(.horizontal, 8)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(EditorialPalette.textTertiary.opacity(0.18))
+                .frame(height: 1)
+        }
+    }
+
+    private func sidebarSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .bold))
+            .kerning(1.3)
+            .foregroundStyle(EditorialPalette.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
+    }
+
+    private func deletedSidebarRow(record: QueryHistoryRecord) -> some View {
+        SidebarHistoryRow(
+            label: record.firstQuestion,
+            isActive: false,
+            font: activeFont,
+            isDimmed: true,
+            action: {
+                model.restoreHistorySession(record)
+                followUpText = ""
+                showSettings = false
+                showingDeleted = false
+            },
+            onDelete: {
+                model.permanentlyDeleteHistorySession(record)
+            },
+            deleteIcon: "xmark",
+            deleteHelp: "Delete permanently",
+            extraContextActions: [
+                .init(title: "Restore Chat", systemImage: "arrow.uturn.backward", role: nil) {
+                    model.restoreHistorySession(record)
+                    followUpText = ""
+                    showSettings = false
+                    showingDeleted = false
+                }
+            ],
+            deleteContextTitle: "Delete Permanently"
+        )
         .padding(.horizontal, 4)
+    }
+
+    private func sidebarRow(
+        label: String,
+        isActive: Bool,
+        action: @escaping () -> Void,
+        onDelete: (() -> Void)? = nil
+    ) -> some View {
+        SidebarHistoryRow(
+            label: label,
+            isActive: isActive,
+            font: activeFont,
+            action: action,
+            onDelete: onDelete
+        )
+        .padding(.horizontal, 4)
+    }
+}
+
+struct SidebarRowContextAction {
+    let title: String
+    let systemImage: String
+    let role: ButtonRole?
+    let action: () -> Void
+
+    init(title: String, systemImage: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.role = role
+        self.action = action
+    }
+}
+
+private struct SidebarHistoryRow: View {
+    let label: String
+    let isActive: Bool
+    let font: AppFont
+    var isDimmed: Bool = false
+    let action: () -> Void
+    let onDelete: (() -> Void)?
+    var deleteIcon: String = "trash"
+    var deleteHelp: String = "Delete chat"
+    var extraContextActions: [SidebarRowContextAction] = []
+    var deleteContextTitle: String = "Delete Chat"
+
+    @State private var isHovering = false
+
+    private var foreground: Color {
+        if isActive { return EditorialPalette.textPrimary }
+        if isDimmed { return EditorialPalette.textTertiary }
+        return EditorialPalette.textSecondary
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button(action: action) {
+                Text(label)
+                    .font(.system(size: 12, design: font.design))
+                    .foregroundStyle(foreground)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .padding(.trailing, onDelete != nil ? 22 : 0)
+                    .background(
+                        isActive
+                            ? RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(EditorialPalette.surface)
+                            : nil
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let onDelete, isHovering {
+                Button(action: onDelete) {
+                    Image(systemName: deleteIcon)
+                        .font(.system(size: 10, weight: .regular))
+                        .foregroundStyle(EditorialPalette.textTertiary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(deleteHelp)
+            }
+        }
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .contextMenu {
+            ForEach(0..<extraContextActions.count, id: \.self) { idx in
+                let item = extraContextActions[idx]
+                Button(role: item.role, action: item.action) {
+                    Label(item.title, systemImage: item.systemImage)
+                }
+            }
+            if let onDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Label(deleteContextTitle, systemImage: "trash")
+                }
+            }
+        }
     }
 }
 

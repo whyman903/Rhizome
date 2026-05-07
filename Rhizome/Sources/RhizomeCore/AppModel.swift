@@ -47,6 +47,7 @@ public final class AppModel {
     public let feedStore: FeedStore
     public private(set) var querySession = QuerySession()
     public private(set) var queryHistory: [QueryHistoryRecord] = []
+    public private(set) var deletedQueryHistory: [QueryHistoryRecord] = []
     public var hasActiveQuerySession: Bool {
         querySession.status != .idle || !querySession.turns.isEmpty
     }
@@ -55,6 +56,9 @@ public final class AppModel {
     }
     public var sidebarQueryHistory: [QueryHistoryRecord] {
         queryHistory
+    }
+    public var sidebarDeletedQueryHistory: [QueryHistoryRecord] {
+        deletedQueryHistory
     }
     public var lastError: String?
     public var statusMessage = "Preparing workspace..."
@@ -88,6 +92,7 @@ public final class AppModel {
     private let fontKey = "appFont"
     private let graphPluginPromptSuppressedKeyPrefix = "graphPluginPromptSuppressed."
     private let maxQueryHistoryRecords = 50
+    private let deletedQueryHistoryRetention: TimeInterval = 60 * 60 * 24 * 30
     private var didBootstrap = false
     private var toastClearTask: Task<Void, Never>?
     private var activeQueryTask: Task<Void, Never>?
@@ -446,6 +451,59 @@ public final class AppModel {
         querySession = QuerySession()
     }
 
+    /// Move a chat from active history into "Recently Deleted". If the chat is
+    /// currently displayed, also clear the active session so the UI returns to
+    /// a blank state. Entries are kept for 30 days before being purged.
+    public func deleteHistorySession(_ record: QueryHistoryRecord) {
+        let isActive = record.id == querySession.id
+        queryHistory.removeAll { $0.id == record.id }
+        let trashed = QueryHistoryRecord(
+            id: record.id,
+            turns: record.turns,
+            claudeSessionID: record.claudeSessionID,
+            archivedAt: Date()
+        )
+        deletedQueryHistory.removeAll { $0.id == trashed.id }
+        deletedQueryHistory.insert(trashed, at: 0)
+        deletedQueryHistory = normalizedHistory(deletedQueryHistory)
+        saveHistory()
+        saveDeletedHistory()
+        if isActive {
+            activeQueryTask?.cancel()
+            activeQueryTask = nil
+            querySession = QuerySession()
+        }
+    }
+
+    /// Move a chat back from "Recently Deleted" into active history.
+    public func restoreHistorySession(_ record: QueryHistoryRecord) {
+        guard let index = deletedQueryHistory.firstIndex(where: { $0.id == record.id }) else {
+            return
+        }
+        let original = deletedQueryHistory.remove(at: index)
+        let restored = QueryHistoryRecord(
+            id: original.id,
+            turns: original.turns,
+            claudeSessionID: original.claudeSessionID,
+            archivedAt: Date()
+        )
+        upsertHistoryRecord(restored)
+        saveDeletedHistory()
+    }
+
+    /// Permanently remove a chat from "Recently Deleted".
+    public func permanentlyDeleteHistorySession(_ record: QueryHistoryRecord) {
+        deletedQueryHistory.removeAll { $0.id == record.id }
+        saveDeletedHistory()
+    }
+
+    /// Empty the "Recently Deleted" section.
+    public func emptyDeletedHistory() {
+        guard !deletedQueryHistory.isEmpty else { return }
+        deletedQueryHistory = []
+        saveDeletedHistory()
+    }
+
     /// Persist the current session into history immediately (called after each completed query).
     private func saveCurrentSession() {
         persistCurrentSession(moveToTop: true)
@@ -474,6 +532,10 @@ public final class AppModel {
 
     private var historyFileURL: URL? {
         workspace?.url.appending(path: ".compile/query-history.json", directoryHint: .notDirectory)
+    }
+
+    private var deletedHistoryFileURL: URL? {
+        workspace?.url.appending(path: ".compile/query-history-deleted.json", directoryHint: .notDirectory)
     }
 
     private func upsertHistoryRecord(_ record: QueryHistoryRecord) {
@@ -988,14 +1050,48 @@ public final class AppModel {
 
     func loadHistory() {
         queryHistory = []
-        guard let url = historyFileURL,
+        if let url = historyFileURL, fileManager.fileExists(atPath: url.path) {
+            do {
+                let data = try Data(contentsOf: url)
+                let decoded = try JSONDecoder().decode([QueryHistoryRecord].self, from: data)
+                queryHistory = normalizedHistory(decoded)
+            } catch {
+                logger.log("Failed to load query history: \(error)")
+            }
+        }
+        loadDeletedHistory()
+    }
+
+    private func saveDeletedHistory() {
+        guard let url = deletedHistoryFileURL else { return }
+        do {
+            try fileManager.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let normalized = normalizedHistory(deletedQueryHistory)
+            let data = try JSONEncoder().encode(normalized)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            logger.log("Failed to save deleted query history: \(error)")
+        }
+    }
+
+    private func loadDeletedHistory() {
+        deletedQueryHistory = []
+        guard let url = deletedHistoryFileURL,
               fileManager.fileExists(atPath: url.path) else { return }
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode([QueryHistoryRecord].self, from: data)
-            queryHistory = normalizedHistory(decoded)
+            let cutoff = Date().addingTimeInterval(-deletedQueryHistoryRetention)
+            let kept = decoded.filter { $0.archivedAt >= cutoff }
+            deletedQueryHistory = normalizedHistory(kept)
+            if kept.count != decoded.count {
+                saveDeletedHistory()
+            }
         } catch {
-            logger.log("Failed to load query history: \(error)")
+            logger.log("Failed to load deleted query history: \(error)")
         }
     }
 
@@ -1316,6 +1412,7 @@ public final class AppModel {
         workspace = info
         querySession = QuerySession()
         queryHistory = []
+        deletedQueryHistory = []
         showGraphPluginInstallPrompt = false
         isInstallingGraphPlugin = false
         statusMessage = "Ready"
