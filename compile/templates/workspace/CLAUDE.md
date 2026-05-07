@@ -13,6 +13,7 @@ wiki/
   sources/      Source notes anchored to raw material
   maps/         Navigation pages
   outputs/      Saved derived artifacts
+  watches/      Recurring URL pulls (created and updated by `compile watch`)
   index.md      Catalog of all pages
   overview.md   Landing page
   log.md        Append-only chronology

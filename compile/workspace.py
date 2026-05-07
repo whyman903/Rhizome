@@ -9,7 +9,7 @@ import yaml
 from compile.config import Config, save_config
 from compile.dates import format_frontmatter_datetime, now_frontmatter, now_machine
 from compile.markdown import parse_markdown_text
-from compile.page_types import ARTICLE_PAGE_TYPES, MAP_PAGE_TYPES, OUTPUT_PAGE_TYPES
+from compile.page_types import ARTICLE_PAGE_TYPES, MAP_PAGE_TYPES, OUTPUT_PAGE_TYPES, WATCH_PAGE_TYPES
 
 COMPILE_CSS = """\
 .frontmatter-container .metadata-property[data-property-key="type"] .metadata-property-value {
@@ -146,7 +146,7 @@ def list_wiki_canvas_files(config: Config) -> list[str]:
 
 def collect_pages_by_type(config: Config) -> dict[str, list[dict[str, str]]]:
     buckets: dict[str, list[dict[str, str]]] = {
-        "articles": [], "sources": [], "maps": [], "outputs": [], "other": [],
+        "articles": [], "sources": [], "maps": [], "outputs": [], "watches": [], "other": [],
     }
     for page_path in list_wiki_pages(config):
         if page_path in ("index.md", "overview.md", "log.md"):
@@ -175,7 +175,8 @@ def write_index(config: Config, pages_by_type: dict[str, list[dict[str, str]]]) 
     created = _preserved_created(config.wiki_dir / "index.md", now)
     sections = [
         ("Articles", "articles"), ("Sources", "sources"),
-        ("Maps", "maps"), ("Outputs", "outputs"), ("Other", "other"),
+        ("Maps", "maps"), ("Outputs", "outputs"),
+        ("Watches", "watches"), ("Other", "other"),
     ]
     has_content = any(pages_by_type.get(key) for _, key in sections)
     index_fm = {"title": "Index", "type": "index", "created": created, "updated": now}
@@ -297,6 +298,8 @@ def _bucket_for_page(page_type: str, page_path: str) -> str:
         return "maps"
     if t in OUTPUT_PAGE_TYPES or page_path.startswith("outputs/"):
         return "outputs"
+    if t in WATCH_PAGE_TYPES or page_path.startswith("watches/"):
+        return "watches"
     return "other"
 
 

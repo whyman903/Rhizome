@@ -94,6 +94,8 @@ struct LauncherView: View {
                 }
                 Button("Open Other Workspace…") { model.chooseOtherWorkspace() }
                 Divider()
+                Button("Watches…") { openWindow(id: "watches-window") }
+                Divider()
                 Button("Quit Rhizome") { NSApplication.shared.terminate(nil) }
             } label: {
                 Image(systemName: "ellipsis")

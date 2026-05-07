@@ -146,6 +146,7 @@ def _inferred_page_type(relative_path: str) -> str:
         "wiki/sources/": "source",
         "wiki/maps/": "map",
         "wiki/outputs/": "output",
+        "wiki/watches/": "watch",
         "wiki/concepts/": "concept",
         "wiki/entities/": "entity",
         "wiki/questions/": "question",
@@ -880,6 +881,7 @@ class ObsidianConnector:
                 "dashboard": "wiki/maps",
                 "output": "wiki/outputs",
                 "comparison": "wiki/outputs",
+                "watch": "wiki/watches",
                 "overview": "wiki",
                 "index": "wiki",
                 "log": "wiki",
@@ -922,7 +924,7 @@ class ObsidianConnector:
         self._file_by_locator = {}
 
     def _default_status_for_type(self, page_type: str) -> str:
-        if page_type in {"source", "map", "dashboard", "output", "comparison", "overview", "index", "log"}:
+        if page_type in {"source", "map", "dashboard", "output", "comparison", "watch", "overview", "index", "log"}:
             return "stable"
         return "seed"
 

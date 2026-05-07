@@ -106,6 +106,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         - For recent uploads or fuzzy memory such as "a paper from last week about GRPO", inspect file metadata and source/raw paths with `stat`, `find`, `rg`, and wiki search.
         - For broad/deep questions, use Task subagents to parallelize independent searches or source-reading passes.
         - Before saying a topic is not in the wiki, run both `compile obsidian search` and direct `rg`/file search across `wiki/` and `raw/` for exact phrases, acronyms, expansions, and likely aliases. Briefly state what you searched.
+        - For acronyms, abbreviations, proper nouns, or short definitional lookups ("what is X?", "define X", a bare term like "XAI" or "RAG"), you MUST run `compile obsidian search` for the term before answering. Common acronyms frequently have a wiki-specific meaning that overrides the textbook one — answering from prior knowledge without searching is a hallucination. If the term has multiple plausible expansions, search each.
         - For modern technical/current topics not covered by the wiki, use WebSearch/WebFetch when current external grounding would materially improve the answer. If you do not search the web, avoid current-state claims.
         - Keep searches bounded: after a broad pass plus about five targeted searches, answer with gathered evidence and offer to dig further if useful.
         - Do not use todo or planning tools for query answers.
