@@ -43,16 +43,43 @@ DEFAULT_CLAUDE_EXECUTABLE = "claude"
 # --------- Frequency parsing -----------------------------------------------------
 
 
+_INTERVAL_UNITS = {
+    "hour": "hourly",
+    "hours": "hourly",
+    "hr": "hourly",
+    "hrs": "hourly",
+    "day": "daily",
+    "days": "daily",
+    "week": "weekly",
+    "weeks": "weekly",
+    "wk": "weekly",
+    "wks": "weekly",
+}
+
+
 @dataclass
 class Frequency:
-    """Normalized representation of a watch frequency."""
+    """Normalized representation of a watch frequency.
+
+    For interval kinds (hourly/daily/weekly), ``count`` is the multiplier — e.g.
+    ``Frequency(kind="hourly", count=12)`` means "every 12 hours". Defaults to 1
+    so the existing simple ``Frequency("daily")`` constructor still works.
+    """
     kind: str            # "hourly" | "daily" | "weekly" | "cron"
     cron: str | None = None
+    count: int = 1
 
     def serialize(self) -> str:
         if self.kind == "cron":
             return f"cron: {self.cron}"
-        return self.kind
+        if self.count <= 1:
+            return self.kind
+        unit = {
+            "hourly": "hours",
+            "daily": "days",
+            "weekly": "weeks",
+        }[self.kind]
+        return f"every {self.count} {unit}"
 
 
 def parse_frequency(value: str) -> Frequency:
@@ -67,10 +94,44 @@ def parse_frequency(value: str) -> Frequency:
             raise ValueError("cron frequency must include an expression after 'cron:'")
         _validate_cron_floor(cron)
         return Frequency(kind="cron", cron=cron)
+    if text.startswith("every"):
+        return _parse_interval(text, original=value)
     raise ValueError(
         f"unsupported frequency '{value}'. Use one of: hourly, daily, weekly, "
-        "or 'cron: <expression>' (minimum cadence is hourly)."
+        "'every N hours|days|weeks', or 'cron: <expression>' "
+        "(minimum cadence is hourly)."
     )
+
+
+def _parse_interval(text: str, *, original: str) -> Frequency:
+    """Parse 'every N hours|days|weeks' (and singular forms)."""
+    parts = text.split()
+    # Accept "every 12 hours", "every 2 days", "every week", "every 2 weeks".
+    if len(parts) == 2 and parts[1] in _INTERVAL_UNITS:
+        count = 1
+        unit = parts[1]
+    elif len(parts) == 3:
+        try:
+            count = int(parts[1])
+        except ValueError as exc:
+            raise ValueError(
+                f"interval frequency '{original}' needs a positive integer count "
+                "(e.g. 'every 2 weeks')."
+            ) from exc
+        unit = parts[2]
+    else:
+        raise ValueError(
+            f"interval frequency '{original}' must look like 'every N hours|days|weeks'."
+        )
+    if count < 1:
+        raise ValueError(
+            f"interval frequency '{original}' count must be at least 1."
+        )
+    if unit not in _INTERVAL_UNITS:
+        raise ValueError(
+            f"interval frequency '{original}' unit must be hours, days, or weeks."
+        )
+    return Frequency(kind=_INTERVAL_UNITS[unit], count=count)
 
 
 def _validate_cron_floor(cron: str) -> None:
@@ -93,12 +154,13 @@ def _validate_cron_floor(cron: str) -> None:
 
 def next_fire_time(frequency: Frequency, *, after: datetime) -> datetime:
     """When should the next run happen, strictly after *after*."""
+    count = max(frequency.count, 1)
     if frequency.kind == "hourly":
-        return _next_aligned(after, hours=1)
+        return _next_aligned(after, hours=count)
     if frequency.kind == "daily":
-        return _next_aligned(after, days=1)
+        return _next_aligned(after, days=count)
     if frequency.kind == "weekly":
-        return _next_aligned(after, days=7)
+        return _next_aligned(after, days=7 * count)
     if frequency.kind == "cron":
         return _next_cron(after, frequency.cron or "")
     raise ValueError(f"unknown frequency kind: {frequency.kind}")
@@ -304,7 +366,9 @@ def resume_watch(config: Config, locator: str) -> Watch:
 def remove_watch(config: Config, locator: str, *, keep_page: bool = False) -> str:
     page = _get_watch_page(config, locator)
     abs_path = config.workspace_root / page.relative_path
-    if not keep_page and abs_path.exists():
+    if keep_page:
+        _archive_watch_page(config, page)
+    elif abs_path.exists():
         abs_path.unlink()
     _sync_state_from_pages(config)
     return page.relative_path
@@ -490,14 +554,13 @@ def _synthesize_step(
         "json",
         "--add-dir",
         str(config.wiki_dir),
-        prompt,
     ]
     env = _claude_env(config)
     completed = subprocess.run(
         args,
         cwd=str(config.workspace_root),
         env=env,
-        stdin=subprocess.DEVNULL,
+        input=prompt,
         text=True,
         capture_output=True,
         timeout=claude_timeout,
@@ -653,6 +716,29 @@ def _rewrite_page(
     )
     _sync_state_from_pages(config)
     return _watch_from_page(new_page)
+
+
+def _archive_watch_page(config: Config, page: VaultPage) -> None:
+    connector = ObsidianConnector(config.workspace_root)
+    tags = [tag for tag in page.tags if tag != "watch"]
+    archived_frontmatter = {
+        key: None
+        for key in page.frontmatter
+        if key == "watch_id" or key.startswith("watch_")
+    }
+    archived_frontmatter["tags"] = tags or None
+    connector.upsert_page(
+        title=page.title,
+        body=page.body,
+        page_type="article",
+        tags=tags,
+        sources=[],
+        aliases=page.aliases,
+        summary=str(page.frontmatter.get("summary") or "").strip() or None,
+        relative_path=page.relative_path,
+        extra_frontmatter=archived_frontmatter,
+        ensure_title_heading=False,
+    )
 
 
 def _initial_body(*, intent: str, url: str, frequency: str) -> str:

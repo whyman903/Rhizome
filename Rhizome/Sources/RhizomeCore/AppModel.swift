@@ -64,6 +64,9 @@ public final class AppModel {
     public var statusMessage = "Preparing workspace..."
     public var launcherToast: String?
     public var showGraphPluginInstallPrompt = false
+    /// Bumped whenever the menu-bar launcher asks the main window to show the
+    /// Watches pane. The query window observes this counter and switches panes.
+    public private(set) var watchesPaneRequestToken: Int = 0
     public private(set) var isInstallingGraphPlugin = false
     public var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: themeKey) }
@@ -85,6 +88,7 @@ public final class AppModel {
     private let isGraphPluginInstalledHandler: @MainActor (URL) -> Bool
     private let installGraphPluginHandler: @MainActor (URL) async throws -> Void
     private let isObsidianRunningHandler: @MainActor () -> Bool
+    private let installWatchTrigger: (@MainActor (URL) throws -> Void)?
     private let defaultWorkspaceName = "Rhizome"
     private let recentKey = "recentWorkspacePaths"
     private let currentWorkspaceKey = "currentWorkspacePath"
@@ -114,7 +118,8 @@ public final class AppModel {
         installGraphPluginHandler: @escaping @MainActor (URL) async throws -> Void = {
             try await ObsidianAdvancedURIInstaller.installAndEnable(in: $0)
         },
-        isObsidianRunningHandler: @escaping @MainActor () -> Bool = ObsidianOpener.isObsidianRunning
+        isObsidianRunningHandler: @escaping @MainActor () -> Bool = ObsidianOpener.isObsidianRunning,
+        installWatchTrigger: (@MainActor (URL) throws -> Void)? = nil
     ) {
         self.logger = logger
         let resolvedRunner = runner ?? CompileRunner(logger: logger)
@@ -132,6 +137,7 @@ public final class AppModel {
         self.isGraphPluginInstalledHandler = isGraphPluginInstalledHandler
         self.installGraphPluginHandler = installGraphPluginHandler
         self.isObsidianRunningHandler = isObsidianRunningHandler
+        self.installWatchTrigger = installWatchTrigger
         self.recentWorkspacePaths = defaults.stringArray(forKey: recentKey) ?? []
         self.theme = AppTheme(rawValue: defaults.string(forKey: "appTheme") ?? "") ?? .umber
         self.font = AppFont(rawValue: defaults.string(forKey: "appFont") ?? "") ?? .serif
@@ -271,6 +277,10 @@ public final class AppModel {
         activeQueryTask?.cancel()
         activeQueryTask = nil
         querySession.cancel()
+    }
+
+    public func requestWatchesPane() {
+        watchesPaneRequestToken &+= 1
     }
 
     public func dismissQueryResponse() {
@@ -1421,6 +1431,17 @@ public final class AppModel {
         rememberWorkspacePath(info.path)
         feedStore.bindWorkspace(info.url)
         loadHistory()
+        installWatchTriggerIfConfigured(for: info.url)
+    }
+
+    private func installWatchTriggerIfConfigured(for workspaceURL: URL) {
+        guard let installWatchTrigger else { return }
+        do {
+            try installWatchTrigger(workspaceURL)
+        } catch {
+            logger.log("Failed to install watch trigger: \(error)")
+            lastError = "Could not install watch trigger: \(error.localizedDescription)"
+        }
     }
 
     private func rememberWorkspacePath(_ path: String) {

@@ -82,15 +82,22 @@ public struct WatchScheduler: Sendable {
             withIntermediateDirectories: true
         )
         try plist.write(to: plistURL, atomically: true, encoding: .utf8)
-        runLaunchctl(["bootout", "gui/\(uid())", plistURL.path])  // ignore failure on first install
-        runLaunchctl(["bootstrap", "gui/\(uid())", plistURL.path])
+        _ = runLaunchctl(["bootout", "gui/\(uid())", plistURL.path])  // ignore failure on first install
+        let bootstrap = runLaunchctl(["bootstrap", "gui/\(uid())", plistURL.path])
+        guard bootstrap.status == 0 else {
+            throw CompileCommandError(
+                bootstrap.stderr.isEmpty
+                    ? "launchctl bootstrap failed with code \(bootstrap.status)."
+                    : bootstrap.stderr
+            )
+        }
         logger?.log("WatchScheduler: installed \(plistURL.path) for \(workspaceURL.path)")
         return plistURL
     }
 
     /// Unload and delete the plist if present.
     public func uninstall() {
-        runLaunchctl(["bootout", "gui/\(uid())", plistURL.path])
+        _ = runLaunchctl(["bootout", "gui/\(uid())", plistURL.path])
         try? FileManager.default.removeItem(at: plistURL)
         logger?.log("WatchScheduler: removed \(plistURL.path)")
     }
@@ -99,20 +106,25 @@ public struct WatchScheduler: Sendable {
         FileManager.default.fileExists(atPath: plistURL.path)
     }
 
-    @discardableResult
-    private func runLaunchctl(_ arguments: [String]) -> Int32 {
+    private func runLaunchctl(_ arguments: [String]) -> (status: Int32, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = arguments
         process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
         do {
             try process.run()
             process.waitUntilExit()
-            return process.terminationStatus
+            let stderr = String(
+                decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (process.terminationStatus, stderr)
         } catch {
             logger?.log("WatchScheduler: launchctl \(arguments.joined(separator: " ")) failed — \(error)")
-            return -1
+            return (-1, error.localizedDescription)
         }
     }
 

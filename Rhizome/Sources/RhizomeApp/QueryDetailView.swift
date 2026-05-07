@@ -2,11 +2,19 @@ import AppKit
 import SwiftUI
 import RhizomeCore
 
+enum QueryDetailPane {
+    case conversation
+    case watches
+    case settings
+}
+
 struct QueryDetailView: View {
     @Bindable var model: AppModel
+    @Bindable var watchesViewModel: WatchesViewModel
+    @Environment(\.openWindow) private var openWindow
     @State private var followUpText = ""
     @AppStorage("RhizomeSidebarVisible") private var sidebarVisible = false
-    @State private var showSettings = false
+    @State private var activePane: QueryDetailPane = .conversation
     @State private var showingDeleted = false
     @FocusState private var isInputFocused: Bool
 
@@ -27,11 +35,14 @@ struct QueryDetailView: View {
                 historySidebar
             } detail: {
                 VStack(spacing: 0) {
-                    if showSettings {
-                        SettingsView(model: model)
-                    } else {
+                    switch activePane {
+                    case .conversation:
                         conversationArea
                         bottomPanel
+                    case .watches:
+                        WatchesView(viewModel: watchesViewModel)
+                    case .settings:
+                        SettingsView(model: model)
                     }
                 }
             }
@@ -46,6 +57,10 @@ struct QueryDetailView: View {
         .background(EditorialPalette.background)
         .id("\(model.theme.rawValue).\(model.font.rawValue)")
         .preferredColorScheme(model.theme.prefersDarkMode ? .dark : .light)
+        .onChange(of: model.watchesPaneRequestToken) { _, _ in
+            activePane = .watches
+            Task { await watchesViewModel.reload() }
+        }
         .alert("Install Advanced URI?", isPresented: $model.showGraphPluginInstallPrompt) {
             Button("Install") {
                 Task {
@@ -86,10 +101,24 @@ struct QueryDetailView: View {
 
             HStack(spacing: 2) {
                 ChromeIconButton(
+                    systemName: "binoculars",
+                    isActive: activePane == .watches,
+                    help: activePane == .watches ? "Back" : "Watches"
+                ) {
+                    if activePane == .watches {
+                        activePane = .conversation
+                    } else {
+                        activePane = .watches
+                        Task { await watchesViewModel.reload() }
+                    }
+                }
+
+                ChromeIconButton(
                     systemName: "plus",
                     isActive: false,
                     help: "New query"
                 ) {
+                    activePane = .conversation
                     model.startNewQuery()
                     followUpText = ""
                     isInputFocused = true
@@ -97,10 +126,10 @@ struct QueryDetailView: View {
 
                 ChromeIconButton(
                     systemName: "gearshape",
-                    isActive: showSettings,
-                    help: showSettings ? "Back" : "Settings"
+                    isActive: activePane == .settings,
+                    help: activePane == .settings ? "Back" : "Settings"
                 ) {
-                    showSettings.toggle()
+                    activePane = activePane == .settings ? .conversation : .settings
                 }
             }
         }
@@ -296,6 +325,16 @@ struct QueryDetailView: View {
                     .font(.system(size: 12, weight: .regular))
             }
             QueryActionButton(
+                title: "Watches",
+                action: {
+                    activePane = .watches
+                    Task { await watchesViewModel.reload() }
+                }
+            ) {
+                Image(systemName: "binoculars")
+                    .font(.system(size: 12, weight: .regular))
+            }
+            QueryActionButton(
                 title: "Files",
                 action: { model.chooseFilesForIngest() }
             ) {
@@ -343,7 +382,7 @@ struct QueryDetailView: View {
                                 label: model.querySession.firstQuestion,
                                 isActive: true,
                                 action: {
-                                    showSettings = false
+                                    activePane = .conversation
                                 }
                             )
                         }
@@ -354,7 +393,7 @@ struct QueryDetailView: View {
                                 action: {
                                     model.selectHistorySession(record)
                                     followUpText = ""
-                                    showSettings = false
+                                    activePane = .conversation
                                 },
                                 onDelete: {
                                     model.deleteHistorySession(record)
@@ -470,7 +509,7 @@ struct QueryDetailView: View {
             action: {
                 model.restoreHistorySession(record)
                 followUpText = ""
-                showSettings = false
+                activePane = .conversation
                 showingDeleted = false
             },
             onDelete: {
@@ -482,7 +521,7 @@ struct QueryDetailView: View {
                 .init(title: "Restore Chat", systemImage: "arrow.uturn.backward", role: nil) {
                     model.restoreHistorySession(record)
                     followUpText = ""
-                    showSettings = false
+                    activePane = .conversation
                     showingDeleted = false
                 }
             ],
@@ -912,6 +951,7 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
         controller.splitView.autosaveName = autosaveName
 
         let sidebarHost = NSHostingController(rootView: sidebar)
+        sidebarHost.sizingOptions = []
         sidebarHost.view.frame.size.width = defaultSidebarWidth
         let sidebarItem = NSSplitViewItem(viewController: sidebarHost)
         sidebarItem.canCollapse = true
@@ -922,6 +962,7 @@ private struct SplitViewContainer<Sidebar: View, Detail: View>: NSViewController
         sidebarItem.isCollapsed = sidebarCollapsed
 
         let detailHost = NSHostingController(rootView: detail)
+        detailHost.sizingOptions = []
         let detailItem = NSSplitViewItem(viewController: detailHost)
         detailItem.canCollapse = false
         detailItem.minimumThickness = 320

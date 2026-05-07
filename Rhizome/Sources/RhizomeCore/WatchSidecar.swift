@@ -131,6 +131,13 @@ public final class WatchSidecar: WatchSidecarRunning, @unchecked Sendable {
             throw CompileCommandError(stderr.isEmpty ? "compile-bin watch run failed." : stderr)
         }
         let envelope = try decoder.decode(WatchRunEnvelope.self, from: stdout)
+        guard envelope.ok else {
+            throw CompileCommandError(
+                envelope.error
+                    ?? envelope.event?.error
+                    ?? "compile-bin watch run failed."
+            )
+        }
         guard let event = envelope.event else {
             throw CompileCommandError(envelope.error ?? "compile-bin watch run returned no event.")
         }

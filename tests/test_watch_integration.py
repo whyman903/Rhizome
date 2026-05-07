@@ -42,7 +42,7 @@ class _ScriptedClaude:
 
     def __init__(self, responses: list[Any]) -> None:
         self.responses = list(responses)
-        self.calls: list[list[str]] = []
+        self.calls: list[dict[str, Any]] = []
 
     class _Result:
         def __init__(self, *, returncode: int, stdout: str, stderr: str) -> None:
@@ -50,8 +50,8 @@ class _ScriptedClaude:
             self.stdout = stdout
             self.stderr = stderr
 
-    def __call__(self, args: list[str], **_: Any) -> "_ScriptedClaude._Result":
-        self.calls.append(args)
+    def __call__(self, args: list[str], **kwargs: Any) -> "_ScriptedClaude._Result":
+        self.calls.append({"args": list(args), "input": kwargs.get("input")})
         if not self.responses:
             return self._Result(returncode=2, stdout="", stderr="no scripted response")
         nxt = self.responses.pop(0)
@@ -229,12 +229,13 @@ def test_full_watch_lifecycle_via_cli(
 
     # Claude was invoked once with --add-dir pointing at the wiki directory.
     assert len(claude.calls) == 1
-    call_args = claude.calls[0]
+    call_args = claude.calls[0]["args"]
     assert "--add-dir" in call_args
     assert "--output-format" in call_args
     assert "json" in call_args
     add_dir_idx = call_args.index("--add-dir")
     assert call_args[add_dir_idx + 1] == str(workspace / "wiki")
+    assert "List the top items in plain English." in str(claude.calls[0]["input"])
 
     # --- 5. Run again with same content: unchanged path --------------------
     run2 = runner.invoke(
@@ -419,7 +420,7 @@ def test_health_passes_after_watches_added(
 def test_remove_keep_page_unregisters_but_leaves_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`--keep-page` should leave the markdown file in the vault for archival."""
+    """`--keep-page` should archive the page but remove it from scheduling."""
     workspace = _make_workspace(tmp_path)
     _install_stubs(monkeypatch, bodies=[], claude_responses=[])
 
@@ -443,10 +444,11 @@ def test_remove_keep_page_unregisters_but_leaves_file(
     assert result.exit_code == 0
     assert page_path.exists(), "page must remain when --keep-page is passed"
     state = json.loads((workspace / ".compile" / "watches.json").read_text())
-    # The page is still on disk so still appears in the rebuilt state — that's
-    # consistent with the documented contract: page frontmatter is the source
-    # of truth, the state file is rebuilt from it.
-    assert any(w["title"] == "Keeper" for w in state["watches"])
+    assert state["watches"] == []
+    archived_frontmatter = _read_frontmatter(page_path)
+    assert archived_frontmatter["type"] == "article"
+    assert "watch_id" not in archived_frontmatter
+    assert "watch" not in archived_frontmatter.get("tags", [])
 
 
 def test_synthesis_prompt_includes_intent_and_fetched_content(
@@ -471,8 +473,8 @@ def test_synthesis_prompt_includes_intent_and_fetched_content(
     watch_module.run_watch(config, record.title)
 
     assert len(claude.calls) == 1
-    # The prompt is the trailing positional argument after the flags.
-    prompt = claude.calls[0][-1]
+    # The prompt is passed over stdin so Claude's variadic options cannot swallow it.
+    prompt = str(claude.calls[0]["input"])
     assert "INTENT_MARKER_X" in prompt
     assert "FETCHED_MARKER_42" in prompt
     assert "[[wikilinks]]" in prompt  # instructions about wikilinks present

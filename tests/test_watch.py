@@ -62,6 +62,54 @@ def test_next_fire_time_hourly_advances_one_hour() -> None:
     assert (nxt - base).total_seconds() <= 3600
 
 
+@pytest.mark.parametrize("value,kind,count", [
+    ("every 12 hours", "hourly", 12),
+    ("every 2 weeks", "weekly", 2),
+    ("every 3 days", "daily", 3),
+    ("every 1 day", "daily", 1),
+    ("every week", "weekly", 1),
+    ("EVERY 4 HOURS", "hourly", 4),
+])
+def test_parse_frequency_interval(value: str, kind: str, count: int) -> None:
+    freq = watch_module.parse_frequency(value)
+    assert freq.kind == kind
+    assert freq.count == count
+
+
+@pytest.mark.parametrize("value", [
+    "every 0 hours",
+    "every -2 weeks",
+    "every two weeks",
+    "every 5 minutes",
+    "every 12",
+])
+def test_parse_frequency_rejects_bad_interval(value: str) -> None:
+    with pytest.raises(ValueError):
+        watch_module.parse_frequency(value)
+
+
+def test_next_fire_time_every_12_hours_jumps_12_hours() -> None:
+    base = datetime(2026, 1, 1, 1, 30, tzinfo=timezone.utc)
+    freq = watch_module.parse_frequency("every 12 hours")
+    nxt = watch_module.next_fire_time(freq, after=base)
+    assert (nxt - base).total_seconds() == pytest.approx(12 * 3600 - 30 * 60)
+
+
+def test_next_fire_time_every_two_weeks_jumps_14_days() -> None:
+    base = datetime(2026, 1, 1, 12, 30, tzinfo=timezone.utc)
+    freq = watch_module.parse_frequency("every 2 weeks")
+    nxt = watch_module.next_fire_time(freq, after=base)
+    assert (nxt - base).days >= 13
+
+
+def test_interval_frequency_serializes_round_trip() -> None:
+    freq = watch_module.parse_frequency("every 12 hours")
+    assert freq.serialize() == "every 12 hours"
+    again = watch_module.parse_frequency(freq.serialize())
+    assert again.kind == freq.kind
+    assert again.count == freq.count
+
+
 def test_next_fire_time_cron_picks_next_match() -> None:
     base = datetime(2026, 1, 1, 12, 30, tzinfo=timezone.utc)
     freq = watch_module.parse_frequency("cron: 0 14 * * *")
@@ -150,8 +198,12 @@ def test_remove_keep_page_leaves_file_in_place(tmp_path: Path) -> None:
     )
     page_path = tmp_path / record.relative_path
     watch_module.remove_watch(config, record.title, keep_page=True)
-    # remove_watch with keep_page only rebuilds state — the page itself is still there.
     assert page_path.exists()
+    assert watch_module.list_watches(config) == []
+    page_text = page_path.read_text()
+    assert "type: article" in page_text
+    assert "watch_id:" not in page_text
+    assert "- watch" not in page_text
 
 
 # ---- run_watch happy / unchanged / failure paths --------------------------------

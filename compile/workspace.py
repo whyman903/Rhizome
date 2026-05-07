@@ -110,12 +110,29 @@ def get_status(config: Config) -> dict:
         if relative in raw_relatives
     )
     connector = ObsidianConnector(config.workspace_root)
-    needs_document_review = sum(
-        1
-        for page in connector.scan()
-        if page.page_type == "source"
-        and str(page.frontmatter.get("review_status") or "").strip() == "needs_document_review"
-    )
+    needs_document_review = 0
+    watches_total = 0
+    watches_active = 0
+    watches_paused = 0
+    watches_failing = 0
+    for page in connector.scan():
+        fm = page.frontmatter
+        if page.page_type == "source":
+            if str(fm.get("review_status") or "").strip() == "needs_document_review":
+                needs_document_review += 1
+        elif page.page_type == "watch":
+            watches_total += 1
+            status_value = str(fm.get("watch_status") or "").strip().lower()
+            try:
+                consecutive_failures = int(fm.get("watch_consecutive_failures") or 0)
+            except (TypeError, ValueError):
+                consecutive_failures = 0
+            if consecutive_failures > 0:
+                watches_failing += 1
+            elif status_value == "paused":
+                watches_paused += 1
+            elif status_value == "active":
+                watches_active += 1
     return {
         "topic": config.topic,
         "description": config.description,
@@ -124,6 +141,10 @@ def get_status(config: Config) -> dict:
         "unprocessed": len(get_unprocessed(config)),
         "needs_document_review": needs_document_review,
         "wiki_pages": len(list(config.wiki_dir.rglob("*.md"))),
+        "watches": watches_total,
+        "watches_active": watches_active,
+        "watches_paused": watches_paused,
+        "watches_failing": watches_failing,
         "workspace_root": str(config.workspace_root),
     }
 

@@ -380,6 +380,45 @@ final class AppModelTests: XCTestCase {
         try data.write(to: historyURL, options: .atomic)
     }
 
+    func testBootstrapInstallsWatchTriggerForActiveWorkspace() async throws {
+        let workspaceURL = tempDirectory.appending(path: "watch-trigger-workspace", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
+
+        let info = WorkspaceInfo(
+            path: workspaceURL.path,
+            topic: "Rhizome",
+            description: "Test workspace",
+            rawFiles: 0,
+            processed: 0,
+            unprocessed: 0,
+            needsDocumentReview: 0,
+            wikiPageCount: 1
+        )
+        let fakeRunner = FakeCompileRunner(
+            workspaceInfo: info,
+            pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")
+        )
+        var installedWorkspaceURL: URL?
+
+        let model = AppModel(
+            runner: fakeRunner,
+            dispatcher: NoopDispatcher(),
+            queryRunner: NoopQueryRunner(),
+            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs", directoryHint: .isDirectory)),
+            defaults: defaults,
+            fileManager: .default,
+            installWatchTrigger: { workspace in
+                installedWorkspaceURL = workspace
+            }
+        )
+
+        await model.bootstrapIfNeeded()
+
+        XCTAssertEqual(model.workspace?.path, workspaceURL.path)
+        XCTAssertEqual(installedWorkspaceURL?.path, workspaceURL.path)
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 1.0,
         pollIntervalNanoseconds: UInt64 = 20_000_000,

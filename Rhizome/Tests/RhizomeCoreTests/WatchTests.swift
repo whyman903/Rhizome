@@ -132,4 +132,30 @@ final class WatchTests: XCTestCase {
             XCTAssertTrue(error.message.contains("boom"), "got: \(error.message)")
         }
     }
+
+    func testWatchSidecarRunOnceSurfacesFailedEnvelope() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let fakeURL = tmpDir.appendingPathComponent("fake-compile-run-fail.sh")
+        let payload = """
+        {"ok":false,"event":{"watch_id":"x","title":"X","relative_path":"wiki/watches/X.md","status":"failed","error":"claude failed","auto_paused":null,"raw_path":null}}
+        """
+        let script = """
+        #!/bin/bash
+        echo '\(payload)'
+        """
+        try script.write(to: fakeURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeURL.path)
+
+        let sidecar = WatchSidecar(logger: AppLogger()) { fakeURL }
+        do {
+            _ = try await sidecar.runOnce("x", force: false, at: tmpDir)
+            XCTFail("expected failed watch run to throw")
+        } catch let error as CompileCommandError {
+            XCTAssertTrue(error.message.contains("claude failed"), "got: \(error.message)")
+        }
+    }
 }

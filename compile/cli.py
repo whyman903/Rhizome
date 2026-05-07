@@ -90,6 +90,10 @@ def _workspace_payload(config, info: dict[str, Any] | None = None) -> dict[str, 
         "unprocessed": info["unprocessed"],
         "needsDocumentReview": info["needs_document_review"],
         "wikiPageCount": info["wiki_pages"],
+        "watches": info.get("watches", 0),
+        "watchesActive": info.get("watches_active", 0),
+        "watchesPaused": info.get("watches_paused", 0),
+        "watchesFailing": info.get("watches_failing", 0),
     }
 
 
@@ -430,7 +434,27 @@ def status(path: str, json_output: bool) -> None:
         "wiki_pages",
     ):
         table.add_row(key.replace("_", " ").title(), str(info[key]))
+    table.add_row("Watches", _format_watches_summary(info))
     console.print(table)
+
+
+def _format_watches_summary(info: dict[str, Any]) -> str:
+    total = info.get("watches", 0)
+    if not total:
+        return "0"
+    parts: list[str] = []
+    active = info.get("watches_active", 0)
+    paused = info.get("watches_paused", 0)
+    failing = info.get("watches_failing", 0)
+    if active:
+        parts.append(f"{active} active")
+    if paused:
+        parts.append(f"{paused} paused")
+    if failing:
+        parts.append(f"{failing} failing")
+    if parts:
+        return f"{total} ({', '.join(parts)})"
+    return str(total)
 
 
 @main.command()
