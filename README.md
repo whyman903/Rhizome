@@ -4,6 +4,10 @@
 
 ## Rhizome.app — the front door
 
+<p align="center">
+  <img src="docs/images/launcher.png" alt="Rhizome menu-bar launcher" width="420">
+</p>
+
 The primary way to use Rhizome is **Rhizome.app**, a native macOS menu-bar companion. It gives you:
 
 - **A query window.** Ask a question in plain English; Claude searches your wiki first, cites your own notes with `[[wikilinks]]`, and fills gaps from general knowledge when needed. Answers stream back as markdown tables, mermaid diagrams, and Obsidian callouts — not just paragraphs.
@@ -11,6 +15,10 @@ The primary way to use Rhizome is **Rhizome.app**, a native macOS menu-bar compa
 - **One-click shortcuts** to open the vault in Obsidian, jump to the Obsidian graph view, reveal the workspace in Finder, or drop into a Terminal at the workspace root.
 - **A bundled CLI sidecar** (`compile-bin`, built with PyInstaller) that handles ingest, synthesis, rendering, and health checks — no separate Python install needed.
 - **Auto-installed slash commands** (`/capture`, `/query`, `/context`, `/ingest`, `/lint`, `/synthesize`, `/notion-sync`, …) that Claude Code can invoke from any terminal session against your wiki.
+
+<p align="center">
+  <img src="docs/images/query-answer.png" alt="Streaming query answer with citations" width="640">
+</p>
 
 Under the hood, Rhizome runs `claude -p` as an agentic research session against your workspace. In-app queries allow Bash, local search/read tools, Task subagents, and web search; direct edit/write tools are blocked. Query mode is answer-first: it searches the wiki by default, and it may save or render through `compile` only when you explicitly ask for an artifact or confirm a follow-up save/integration action.
 
