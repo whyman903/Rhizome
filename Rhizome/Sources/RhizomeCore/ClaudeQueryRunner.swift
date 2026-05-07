@@ -156,6 +156,14 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             let insertIndex = claudeArgs.firstIndex(of: "--append-system-prompt") ?? max(claudeArgs.count - 1, 0)
             claudeArgs.insert("--exclude-dynamic-system-prompt-sections", at: insertIndex)
         }
+        if executableSupportsOption(executable, option: "--strict-mcp-config"),
+           executableSupportsOption(executable, option: "--mcp-config") {
+            let insertIndex = claudeArgs.firstIndex(of: "--allowedTools") ?? max(claudeArgs.count - 1, 0)
+            claudeArgs.insert(
+                contentsOf: ["--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#],
+                at: insertIndex
+            )
+        }
         if executableSupportsOption(executable, option: "--tools ") {
             let insertIndex = claudeArgs.firstIndex(of: "--allowedTools") ?? max(claudeArgs.count - 1, 0)
             claudeArgs.insert(contentsOf: ["--tools", "Read,Grep,Glob,LS,Bash,Task,WebSearch,WebFetch"], at: insertIndex)
@@ -247,16 +255,20 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         let stderrTail = await stderrTask.value.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if process.terminationStatus != 0 {
-            let message: String
+            let rawDiagnostic: String
             if !stderrTail.isEmpty {
-                message = stderrTail
+                rawDiagnostic = stderrTail
             } else if !stdoutTail.isEmpty {
-                message = stdoutTail
+                rawDiagnostic = stdoutTail
             } else {
-                message = "claude -p exited with code \(process.terminationStatus)"
+                rawDiagnostic = "claude -p exited with code \(process.terminationStatus)"
             }
+            let message = Self.cleanFailureMessage(
+                rawDiagnostic: rawDiagnostic,
+                terminationStatus: process.terminationStatus
+            )
             logger.log("ClaudeQueryRunner failure: \(message)")
-            if resumeSessionID != nil, Self.isResumeSessionUnavailable(message) {
+            if resumeSessionID != nil, Self.isResumeSessionUnavailable(rawDiagnostic) {
                 throw ClaudeQueryResumeUnavailableError(message: message)
             }
             await onEvent(.failed(message: message))
@@ -659,7 +671,9 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         }
 
         var answerAfterLatestTool: String?
+        var answerWithoutTools: String?
         var toolUses: [TranscriptToolUse] = []
+        var sawAssistantToolUse = false
         var sawToolResult = false
 
         for line in contents.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -689,6 +703,8 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             }
             if !uses.isEmpty {
                 toolUses.append(contentsOf: uses)
+                sawAssistantToolUse = true
+                answerWithoutTools = nil
                 answerAfterLatestTool = nil
                 continue
             }
@@ -703,10 +719,21 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
 
             if sawToolResult, !text.isEmpty {
                 answerAfterLatestTool = text
+            } else if !sawAssistantToolUse, !text.isEmpty {
+                answerWithoutTools = text
             }
         }
 
-        guard let text = answerAfterLatestTool else {
+        let text: String?
+        if let answerAfterLatestTool {
+            text = answerAfterLatestTool
+        } else if !sawAssistantToolUse {
+            text = answerWithoutTools
+        } else {
+            text = nil
+        }
+
+        guard let text else {
             return nil
         }
 
@@ -720,6 +747,13 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         let stdoutTail = stdoutSummary.unparsedTail.trimmingCharacters(in: .whitespacesAndNewlines)
         if looksLikeTruncatedUserToolResult(stdoutTail) {
             var message = "Claude exited before producing an answer. The stream was cut off mid-tool-result — this is usually a transient Claude CLI error, please retry."
+            if !stderrTail.isEmpty {
+                message += "\n\nstderr:\n\(diagnosticPreview(stderrTail))"
+            }
+            return message
+        }
+        if looksLikePartialSystemInitLine(stdoutTail) {
+            var message = "Claude exited before producing an answer. The stream contained only a partial session-init line — this is usually a transient claude CLI or MCP-server startup error, please retry."
             if !stderrTail.isEmpty {
                 message += "\n\nstderr:\n\(diagnosticPreview(stderrTail))"
             }
@@ -748,6 +782,32 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             """
         }
         return "Claude exited before producing an answer."
+    }
+
+    /// `claude -p` sometimes emits only the long `system/init` JSON line and exits before any
+    /// `assistant` or `result` event arrives. The init line can be ~10 KB once the user has many
+    /// MCP servers and slash commands, and showing the raw partial JSON as the failure message is
+    /// useless and confusing. Detect that case and surface a clean diagnostic instead.
+    private static func looksLikePartialSystemInitLine(_ tail: String) -> Bool {
+        let trimmed = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let firstLine = trimmed
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? trimmed
+        return firstLine.hasPrefix(#"{"type":"system""#)
+            && firstLine.contains(#""subtype":"init""#)
+    }
+
+    private static func cleanFailureMessage(rawDiagnostic: String, terminationStatus: Int32) -> String {
+        if looksLikePartialSystemInitLine(rawDiagnostic) {
+            return """
+            Claude exited before producing an answer. Claude CLI exited (code \(terminationStatus)) right after session init. \
+            This is usually a transient claude CLI or MCP-server startup error. Try again, and if it persists run \
+            `claude -p --output-format stream-json --verbose --model sonnet "hi"` in a terminal to see the underlying error.
+            """
+        }
+        return rawDiagnostic
     }
 
     private static func looksLikeTruncatedUserToolResult(_ tail: String) -> Bool {

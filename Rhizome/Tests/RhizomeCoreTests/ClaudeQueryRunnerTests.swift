@@ -51,6 +51,24 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         return scriptURL
     }
 
+    private func writeTranscript(
+        _ transcript: String,
+        sessionID: String,
+        transcriptRoot: URL
+    ) throws {
+        let projectName = tempDirectory.standardizedFileURL.path
+            .replacingOccurrences(of: "/", with: "-")
+        let transcriptURL = transcriptRoot
+            .appending(path: "projects", directoryHint: .isDirectory)
+            .appending(path: projectName, directoryHint: .isDirectory)
+            .appending(path: "\(sessionID).jsonl", directoryHint: .notDirectory)
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+    }
+
     func testStreamingAssistantTextAndFinishedResultAreEmitted() async throws {
         let stdout = """
         {"type":"system","subtype":"init"}
@@ -319,6 +337,104 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         }, "should recover from transcript instead of failing: \(events)")
     }
 
+    func testZeroExitWithNoToolTranscriptFinalAnswerRecoversAnswer() async throws {
+        // `claude -p` can write a complete answer to its transcript even when stdout only
+        // yields the init event. Recover it so AppModel can classify it as a no-tool answer
+        // and use the normal research-required retry path.
+        let stdout = """
+        {"type":"system","subtype":"init","session_id":"no-tool-transcript-session"}
+        """
+        let scriptURL = try makeFakeClaude(stdout: stdout)
+        let transcriptRoot = tempDirectory.appending(path: "claude-home-no-tool", directoryHint: .isDirectory)
+        let transcript = """
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"TCP is reliable and ordered; UDP is lower-overhead and does not guarantee delivery."}]}}
+        """
+        try writeTranscript(
+            transcript,
+            sessionID: "no-tool-transcript-session",
+            transcriptRoot: transcriptRoot
+        )
+
+        let logger = AppLogger(logDirectory: tempDirectory.appending(path: "logs-transcript-no-tool", directoryHint: .isDirectory))
+        let runner = ClaudeQueryRunner(
+            logger: logger,
+            executableProvider: { scriptURL },
+            transcriptRootProvider: { transcriptRoot }
+        )
+
+        let collector = EventCollector()
+        try await runner.runQuery(
+            prompt: "/query x",
+            workspaceURL: tempDirectory,
+            resumeSessionID: nil,
+            onEvent: { collector.append($0) }
+        )
+
+        let events = collector.snapshot()
+        let finishedText = events.compactMap { event -> String? in
+            if case .finished(let text, _, _, _, _) = event { return text } else { return nil }
+        }.first
+        XCTAssertEqual(
+            finishedText,
+            "TCP is reliable and ordered; UDP is lower-overhead and does not guarantee delivery."
+        )
+        XCTAssertFalse(events.contains { event in
+            if case .toolCall = event { return true }
+            return false
+        }, "no-tool transcript recovery should not invent tool calls: \(events)")
+        XCTAssertFalse(events.contains { event in
+            if case .failed = event { return true }
+            return false
+        }, "should recover transcript answer instead of failing: \(events)")
+    }
+
+    func testTranscriptRecoveryDoesNotReturnPlanningTextBeforeToolUse() async throws {
+        let stdout = """
+        {"type":"system","subtype":"init","session_id":"planning-before-tool-session"}
+        """
+        let scriptURL = try makeFakeClaude(stdout: stdout)
+        let transcriptRoot = tempDirectory.appending(path: "claude-home-planning-tool", directoryHint: .isDirectory)
+        let transcript = """
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Quick check before I answer."}]}}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"compile obsidian search TCP"}}]}}
+        {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"System design networking page"}]}}
+        """
+        try writeTranscript(
+            transcript,
+            sessionID: "planning-before-tool-session",
+            transcriptRoot: transcriptRoot
+        )
+
+        let logger = AppLogger(logDirectory: tempDirectory.appending(path: "logs-transcript-planning-tool", directoryHint: .isDirectory))
+        let runner = ClaudeQueryRunner(
+            logger: logger,
+            executableProvider: { scriptURL },
+            transcriptRootProvider: { transcriptRoot }
+        )
+
+        let collector = EventCollector()
+        try await runner.runQuery(
+            prompt: "/query x",
+            workspaceURL: tempDirectory,
+            resumeSessionID: nil,
+            onEvent: { collector.append($0) }
+        )
+
+        let events = collector.snapshot()
+        XCTAssertFalse(events.contains { event in
+            if case .finished(let text, _, _, _, _) = event {
+                return text.contains("Quick check")
+            }
+            return false
+        }, "planning text before a tool call should not be recovered as the answer: \(events)")
+        XCTAssertTrue(events.contains { event in
+            if case .failed(let message) = event {
+                return message.contains("Claude exited before producing an answer")
+            }
+            return false
+        }, "expected incomplete-answer failure: \(events)")
+    }
+
     func testTranscriptRecoveryEmitsRecoveredToolCalls() async throws {
         let stdout = """
         {"type":"system","subtype":"init","session_id":"transcript-tool-session"}
@@ -392,6 +508,64 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         XCTAssertTrue(message.contains("read a note but never answered"))
     }
 
+    func testZeroExitWithOnlyPartialSystemInitEmitsCleanFailure() async throws {
+        // Mimic the real-world bug where `claude -p` writes its long system/init line and exits
+        // before any further events arrive. The line is truncated mid-array (no closing `}`).
+        let partialInit = #"{"type":"system","subtype":"init","cwd":"/tmp","session_id":"abc","tools":["Task","Bash","Read"],"slash_commands":["clear","compact","ext"#
+        let scriptURL = try makeFakeClaude(stdout: partialInit, exit: 0)
+        let logger = AppLogger(logDirectory: tempDirectory.appending(path: "logs-partial-init-zero", directoryHint: .isDirectory))
+        let runner = ClaudeQueryRunner(logger: logger) { scriptURL }
+
+        let collector = EventCollector()
+        try await runner.runQuery(
+            prompt: "/query x",
+            workspaceURL: tempDirectory,
+            resumeSessionID: nil,
+            onEvent: { collector.append($0) }
+        )
+
+        let failedMessage: String? = collector.snapshot().compactMap { event in
+            if case .failed(let message) = event { return message } else { return nil }
+        }.first
+        let message = try XCTUnwrap(failedMessage)
+        XCTAssertTrue(message.contains("Claude exited before producing an answer"),
+                      "must trigger AppModel.isRetryableIncompleteAnswerFailure auto-retry, got: \(message)")
+        XCTAssertTrue(message.contains("partial session-init line"),
+                      "expected clean partial-init explanation, got: \(message)")
+        XCTAssertFalse(message.contains("\"slash_commands\""),
+                       "should not dump raw partial init JSON, got: \(message)")
+    }
+
+    func testNonZeroExitWithOnlyPartialSystemInitEmitsCleanFailure() async throws {
+        // Same shape as the zero-exit case but the CLI was killed (e.g. exit 143). The user
+        // should see an actionable message, not the truncated init JSON.
+        let partialInit = #"{"type":"system","subtype":"init","cwd":"/tmp","session_id":"abc","tools":["Task","Bash"],"slash_commands":["context","capture","ext"#
+        let scriptURL = try makeFakeClaude(stdout: partialInit, exit: 143)
+        let logger = AppLogger(logDirectory: tempDirectory.appending(path: "logs-partial-init-killed", directoryHint: .isDirectory))
+        let runner = ClaudeQueryRunner(logger: logger) { scriptURL }
+
+        let collector = EventCollector()
+        try await runner.runQuery(
+            prompt: "/query x",
+            workspaceURL: tempDirectory,
+            resumeSessionID: nil,
+            onEvent: { collector.append($0) }
+        )
+
+        let failedMessage: String? = collector.snapshot().compactMap { event in
+            if case .failed(let message) = event { return message } else { return nil }
+        }.first
+        let message = try XCTUnwrap(failedMessage)
+        XCTAssertTrue(message.contains("Claude exited before producing an answer"),
+                      "must trigger AppModel.isRetryableIncompleteAnswerFailure auto-retry, got: \(message)")
+        XCTAssertTrue(message.contains("right after session init"),
+                      "expected actionable post-init exit explanation, got: \(message)")
+        XCTAssertTrue(message.contains("143"),
+                      "expected exit code in message, got: \(message)")
+        XCTAssertFalse(message.contains("\"slash_commands\""),
+                       "should not dump raw partial init JSON, got: \(message)")
+    }
+
     func testMissingResumeSessionThrowsRetryableError() async throws {
         let scriptURL = tempDirectory.appending(path: "claude", directoryHint: .notDirectory)
         let script = """
@@ -450,6 +624,8 @@ final class ClaudeQueryRunnerTests: XCTestCase {
         #!/bin/zsh
         if [[ "$1" == "--help" ]]; then
           echo '--exclude-dynamic-system-prompt-sections'
+          echo '--strict-mcp-config'
+          echo '--mcp-config <configs...>'
           echo '--tools <tools...>'
           exit 0
         fi
@@ -489,6 +665,10 @@ final class ClaudeQueryRunnerTests: XCTestCase {
             ["--tools", "Read,Grep,Glob,LS,Bash,Task,WebSearch,WebFetch"]
         )
         XCTAssertTrue(args.contains("--exclude-dynamic-system-prompt-sections"))
+        XCTAssertEqual(
+            Array(args.drop(while: { $0 != "--strict-mcp-config" }).prefix(3)),
+            ["--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#]
+        )
         XCTAssertEqual(
             Array(args.drop(while: { $0 != "--disallowedTools" }).prefix(2)),
             ["--disallowedTools", "AskUserQuestion,Monitor,Edit,Write,NotebookEdit,MultiEdit"]
