@@ -1903,10 +1903,7 @@ def _extract_for_ingest(config, raw_path: Path, raw_relative: str):
 
 def _source_review_frontmatter(extracted) -> dict[str, str] | None:
     if extracted.requires_document_review and extracted.extraction_method:
-        return {
-            "review_status": "needs_document_review",
-            "extraction_method": extracted.extraction_method,
-        }
+        return {"review_status": "needs_document_review"}
     return None
 
 
@@ -1924,11 +1921,16 @@ def _extract_source_provenance_frontmatter(raw_path: Path) -> dict[str, str] | N
     if comments.get("source") != "notion":
         return None
     frontmatter: dict[str, str] = {}
+    # Only persist the keys that something actually reads:
+    # - notion_page_id: used by `_should_refresh_existing_source_page` to recognize
+    #   a re-sync of the same Notion page.
+    # - notion_url: clickable backlink to the Notion source from Obsidian.
+    # The skip-if-unchanged logic reads `notion_last_edited_time` from the raw
+    # file's HTML comments, so duplicating it (or `notion_synced_at`) into
+    # frontmatter just clutters every Notion-sourced page.
     mapping = {
         "notion_page_id": "notion_page_id",
         "notion_page_url": "notion_url",
-        "notion_last_edited_time": "notion_last_edited_time",
-        "notion_synced_at": "notion_synced_at",
     }
     for comment_key, frontmatter_key in mapping.items():
         value = comments.get(comment_key, "").strip()

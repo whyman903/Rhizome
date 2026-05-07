@@ -363,7 +363,6 @@ Prefer `article` / `map` for new generic workspaces unless this topic truly bene
   - `title`
   - `type`
   - `status`
-  - `summary`
   - `created`
   - `updated`
 - Valid `status` values:
@@ -371,12 +370,12 @@ Prefer `article` / `map` for new generic workspaces unless this topic truly bene
   - `emerging`: partially synthesized; multiple signals or sources but still incomplete
   - `stable`: durable reference page with synthesis, explicit support, and no obvious unresolved structural gaps
 - Recommended optional fields when relevant:
+  - `summary` (only when it adds something beyond the first line of the body)
   - `tags`
   - `aliases`
   - `sources`
   - `source_ids`
   - `citations`
-  - `cssclasses`
 - Use `[[Page Title]]` wikilinks only for pages that already exist, unless you are creating the target page in the same pass.
 - Source-backed pages should preserve provenance explicitly.
 

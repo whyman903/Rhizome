@@ -18,8 +18,9 @@ def generate_marp(title: str, body: str, *, theme: str = "default") -> tuple[str
     """Prepare Marp slide content.
 
     Returns ``(body, extra_frontmatter)`` where *extra_frontmatter* contains
-    the Marp-specific keys (``marp``, ``theme``, ``paginate``) that should be
-    merged into the page's YAML frontmatter block.
+    the Marp-specific keys (``marp``, ``theme``, ``paginate``). These need to
+    live in the page's own YAML frontmatter — that's the only block Marp's
+    CLI parses for global directives. Without them the deck won't render.
 
     The caller is responsible for including ``---`` slide separators in *body*.
     """

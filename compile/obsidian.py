@@ -16,9 +16,7 @@ from compile.markdown import LINE_RE, WORD_RE, extract_wikilinks, parse_markdown
 from compile.page_types import (
     ARTICLE_PAGE_TYPES,
     CONTENT_PAGE_TYPES,
-    DEFAULT_PAGE_TYPES,
     MAP_PAGE_TYPES,
-    MATURITY_STATES,
     NAV_PAGE_TYPES,
 )
 
@@ -679,7 +677,11 @@ class ObsidianConnector:
 
         now = now_frontmatter()
         created = str(frontmatter.get("created") or frontmatter.get("created_at") or now)
-        effective_summary = (summary or str(frontmatter.get("summary", "")).strip() or self._summarize_body(body)).strip()
+        # Only use a summary the caller explicitly provided or one already on
+        # the page. We no longer auto-generate one from the body — the old
+        # behavior just dumped the first 160 chars of body into frontmatter,
+        # which produced low-quality "summaries" that polluted every page.
+        effective_summary = (summary or str(frontmatter.get("summary", "")).strip()).strip()
 
         normalized_tags = sorted({item.strip() for item in (tags or _coerce_list(frontmatter.get("tags"))) if item.strip()})
         normalized_sources = [
@@ -715,19 +717,6 @@ class ObsidianConnector:
                     frontmatter.pop(key, None)
                 else:
                     frontmatter[key] = value
-
-        # Rebuild cssclasses from the final page_type and status so stale maturity
-        # or type labels from prior writes don't linger. Preserve any custom
-        # classes the user added that aren't known type/status values.
-        managed_labels = DEFAULT_PAGE_TYPES | ARTICLE_PAGE_TYPES | CONTENT_PAGE_TYPES | MAP_PAGE_TYPES | MATURITY_STATES
-        preserved_cssclasses = [
-            item.strip()
-            for item in _coerce_list(frontmatter.get("cssclasses"))
-            if item.strip() and item.strip() not in managed_labels
-        ]
-        cssclasses = preserved_cssclasses + [page_type, str(frontmatter["status"])]
-        if cssclasses:
-            frontmatter["cssclasses"] = cssclasses
 
         rendered_body = body.strip()
         if ensure_title_heading:
