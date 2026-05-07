@@ -303,8 +303,11 @@ class TestIngestCommand:
         source_text = (tmp_path / "wiki" / "sources" / "Product Notes.md").read_text()
         assert "notion_page_id: 1429989f-e8ac-4eff-bc8f-57f56486db54" in source_text
         assert "notion_url: https://www.notion.so/product-notes" in source_text
-        assert "notion_last_edited_time: '2026-04-12T12:00:00Z'" in source_text
-        assert "notion_synced_at: '2026-04-12T12:05:00Z'" in source_text
+        # last_edited_time / synced_at stay in the raw file's HTML comments
+        # (where the skip-if-unchanged check actually reads them) and are no
+        # longer duplicated into the source-note frontmatter.
+        assert "notion_last_edited_time" not in source_text
+        assert "notion_synced_at" not in source_text
 
     def test_reingest_notion_markdown_refreshes_matching_source_note(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
@@ -337,7 +340,6 @@ class TestIngestCommand:
         source_text = (tmp_path / "wiki" / "sources" / "Product Notes.md").read_text()
         assert "Updated roadmap decisions." in source_text
         assert "Original roadmap decisions." not in source_text
-        assert "notion_last_edited_time: '2026-04-12T13:00:00Z'" in source_text
 
     def test_reingest_notion_markdown_preserves_user_claimed_note(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
@@ -537,7 +539,7 @@ class TestIngestCommand:
         assert "## Figures" not in source_text
         assert "<!-- compile:figures:start -->" not in source_text
         assert "review_status: needs_document_review" in source_text
-        assert "extraction_method: pymupdf_text" in source_text
+        assert "extraction_method:" not in source_text
         assert "## Review Status" in source_text
 
         raw_sha = compute_sha256(pdf_file)
@@ -1787,8 +1789,12 @@ class TestObsidianUpsertCommand:
         assert "# Custom Intro" in content
         assert "# Prior" not in content
 
-    def test_status_change_rebuilds_cssclasses(self, tmp_path: Path) -> None:
-        """Demotion/promotion must not leave stale maturity labels in cssclasses."""
+    def test_upsert_does_not_generate_cssclasses(self, tmp_path: Path) -> None:
+        """upsert no longer synthesizes cssclasses on a fresh page.
+
+        Existing cssclasses on legacy pages are preserved as-is — clearing
+        those is a one-shot data-migration job, not a per-write concern.
+        """
         init_workspace(tmp_path, "Test")
         runner = CliRunner()
 
@@ -1799,17 +1805,43 @@ class TestObsidianUpsertCommand:
             "--status", "stable",
             "--path", str(tmp_path),
         ])
-        runner.invoke(main, [
+
+        content = (tmp_path / "wiki" / "articles" / "Cycling.md").read_text()
+        assert "cssclasses" not in content
+        assert "status: stable" in content
+
+    def test_upsert_preserves_legacy_cssclasses_on_update(self, tmp_path: Path) -> None:
+        """Document the (intentional) behavior the reviewer flagged: existing
+        cssclasses on legacy pages survive an upsert. Migration is a separate,
+        one-shot concern, not the per-write codepath's job.
+        """
+        init_workspace(tmp_path, "Test")
+        page_path = tmp_path / "wiki" / "articles" / "Cycling.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            "---\n"
+            "title: Cycling\n"
+            "type: article\n"
+            "status: stable\n"
+            "cssclasses:\n"
+            "- article\n"
+            "- stable\n"
+            "---\n\n"
+            "# Cycling\n\nBody.\n"
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
             "obsidian", "upsert", "Cycling",
             "--page-type", "article",
             "--status", "seed",
             "--path", str(tmp_path),
         ])
 
-        content = (tmp_path / "wiki" / "articles" / "Cycling.md").read_text()
-        assert "- seed" in content
-        assert "- stable" not in content
-        assert "- article" in content
+        assert result.exit_code == 0
+        content = page_path.read_text()
+        assert "cssclasses" in content  # preserved
+        assert "status: seed" in content
 
 
 class TestObsidianRefreshCommand:

@@ -38,7 +38,7 @@ Set `RHIZOME_SKIP_LAUNCH=1` (or run under `CI`) to skip the post-build app launc
 
 ### Python CLI (`compile/`)
 
-- `cli.py` — Click command surface (`init`, `status`, `ingest`, `health`, `schema`, plus `obsidian`, `suggest`, `review`, `index`, `render`, `eval`, `claude` subgroups).
+- `cli.py` — Click command surface (`init`, `status`, `ingest`, `health`, `schema`, plus `obsidian`, `suggest`, `review`, `index`, `render`, `eval`, `watch`, `claude` subgroups).
 - `config.py` — workspace config loader (`config.yaml`, `.env`, env-var overrides).
 - `dates.py` — frontmatter / machine timestamp formatting.
 - `text.py` — source extraction and normalization.
@@ -50,6 +50,7 @@ Set `RHIZOME_SKIP_LAUNCH=1` (or run under `CI`) to skip the post-build app launc
 - `workspace.py` — workspace state, status, processing, and generated files.
 - `outputs.py` — explicit renderers for Marp, chart, and canvas outputs.
 - `fetch.py` — URL ingestion and optional image download for web sources.
+- `watch.py` — recurring URL pulls: frequency parsing, change-detection, claude synthesis, append-digest body editor, auto-pause on repeated failure. Page frontmatter is the source of truth; `.compile/watches.json` is a rebuilt scheduler index.
 - `health.py` / `verify.py` — structural and editorial health reporting.
 - `search_index.py` — SQLite FTS index for PDF chunks.
 - `suggest.py` — map-page suggestion heuristics.
@@ -68,6 +69,7 @@ Set `RHIZOME_SKIP_LAUNCH=1` (or run under `CI`) to skip the post-build app launc
   - `CompileRunning.swift` (protocol), `CompileRunner.swift` (sidecar RPC), `CompileEvent.swift` (streamed ingest events), `WorkspaceInfo.swift`, `WikiSearch.swift`, `WikilinkParser.swift`.
   - `ClaudeQueryRunner.swift` (streaming `claude -p`), `QuerySession.swift` (resumable threads), `ClaudeDispatcher.swift` (Terminal hand-off).
   - `AppModel.swift`, `FeedStore.swift`, `Obsidian.swift` (URL scheme opener), `TerminalLauncher.swift`, `AppLogger.swift`.
+  - `WatchSidecar.swift` (RPC for `compile watch ...`), `WatchScheduler.swift` (launchd plist install/uninstall for the recurring tick), `WatchRecord.swift` (Codable contract for the watch JSON envelopes).
 - `Tests/RhizomeCoreTests/` and `Tests/RhizomeAppTests/` — Swift Testing suites covering the sidecar contract, query sessions, markdown rendering, and Obsidian/Terminal launch.
 - `support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
 - `support/Info.plist` / `AppIcon.icns` — bundle metadata.

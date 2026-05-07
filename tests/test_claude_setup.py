@@ -397,6 +397,21 @@ def test_templates_prefer_targeted_edits_over_rewrites(tmp_path: Path) -> None:
     assert "Default to the `Edit` tool" in lint
 
 
+def test_watch_templates_installed(tmp_path: Path) -> None:
+    ws = _make_workspace(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    install_claude_files(ws, home, force=False)
+
+    watch_add = (ws / ".claude" / "commands" / "watch-add.md").read_text()
+    assert "compile watch add" in watch_add
+    assert "minimum cadence is hourly" in watch_add
+
+    watch_review = (ws / ".claude" / "commands" / "watch-review.md").read_text()
+    assert "compile watch list --json-output" in watch_review
+    assert "consecutive_failures" in watch_review
+
+
 def test_invalid_workspace_errors(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["claude", "setup", str(tmp_path / "nope")])

@@ -13,6 +13,7 @@ wiki/
   sources/      Source notes anchored to raw material
   maps/         Navigation pages
   outputs/      Saved derived artifacts
+  watches/      Recurring URL pulls (created and updated by `compile watch`)
   index.md      Catalog of all pages
   overview.md   Landing page
   log.md        Append-only chronology
@@ -176,12 +177,13 @@ Every maintained page should include:
 title: "Page Title"
 type: article
 status: seed
-summary: "One-line description for index and overview."
 created: 2026-04-07 00:00
 updated: 2026-04-07 00:00
 ```
 
-Optional when relevant: `tags`, `aliases`, `sources`, `source_ids`, `cssclasses`.
+Optional when relevant: `summary`, `tags`, `aliases`, `sources`, `source_ids`.
+
+Only write a `summary` when it adds something beyond the first line of the body.
 
 ## Editorial Rules
 

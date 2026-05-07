@@ -148,6 +148,37 @@ class TestGetStatus:
         assert status["raw_files"] == 2
         assert status["unprocessed"] == 2
 
+    def test_counts_watches_by_status(self, tmp_path: Path) -> None:
+        config = init_workspace(tmp_path, "Test")
+        watches_dir = tmp_path / "wiki" / "watches"
+        watches_dir.mkdir(parents=True, exist_ok=True)
+
+        def write_watch(name: str, *, status: str, failures: int = 0) -> None:
+            (watches_dir / f"{name}.md").write_text(
+                "---\n"
+                f"title: {name}\n"
+                "type: watch\n"
+                "url: https://example.com\n"
+                "watch_id: " + name.lower() + "\n"
+                "watch_frequency: daily\n"
+                "watch_intent: x\n"
+                f"watch_status: {status}\n"
+                f"watch_consecutive_failures: {failures}\n"
+                "---\n\nbody\n"
+            )
+
+        write_watch("Active1", status="active")
+        write_watch("Active2", status="active")
+        write_watch("PausedOne", status="paused")
+        write_watch("Failing", status="active", failures=2)
+
+        status = get_status(config)
+
+        assert status["watches"] == 4
+        assert status["watches_active"] == 2
+        assert status["watches_paused"] == 1
+        assert status["watches_failing"] == 1
+
     def test_counts_needs_document_review(self, tmp_path: Path) -> None:
         config = init_workspace(tmp_path, "Test")
         (tmp_path / "wiki" / "sources" / "paper.md").write_text(

@@ -9,7 +9,7 @@ import yaml
 from compile.config import Config, save_config
 from compile.dates import format_frontmatter_datetime, now_frontmatter, now_machine
 from compile.markdown import parse_markdown_text
-from compile.page_types import ARTICLE_PAGE_TYPES, MAP_PAGE_TYPES, OUTPUT_PAGE_TYPES
+from compile.page_types import ARTICLE_PAGE_TYPES, MAP_PAGE_TYPES, OUTPUT_PAGE_TYPES, WATCH_PAGE_TYPES
 
 COMPILE_CSS = """\
 .frontmatter-container .metadata-property[data-property-key="type"] .metadata-property-value {
@@ -110,12 +110,29 @@ def get_status(config: Config) -> dict:
         if relative in raw_relatives
     )
     connector = ObsidianConnector(config.workspace_root)
-    needs_document_review = sum(
-        1
-        for page in connector.scan()
-        if page.page_type == "source"
-        and str(page.frontmatter.get("review_status") or "").strip() == "needs_document_review"
-    )
+    needs_document_review = 0
+    watches_total = 0
+    watches_active = 0
+    watches_paused = 0
+    watches_failing = 0
+    for page in connector.scan():
+        fm = page.frontmatter
+        if page.page_type == "source":
+            if str(fm.get("review_status") or "").strip() == "needs_document_review":
+                needs_document_review += 1
+        elif page.page_type == "watch":
+            watches_total += 1
+            status_value = str(fm.get("watch_status") or "").strip().lower()
+            try:
+                consecutive_failures = int(fm.get("watch_consecutive_failures") or 0)
+            except (TypeError, ValueError):
+                consecutive_failures = 0
+            if consecutive_failures > 0:
+                watches_failing += 1
+            elif status_value == "paused":
+                watches_paused += 1
+            elif status_value == "active":
+                watches_active += 1
     return {
         "topic": config.topic,
         "description": config.description,
@@ -124,6 +141,10 @@ def get_status(config: Config) -> dict:
         "unprocessed": len(get_unprocessed(config)),
         "needs_document_review": needs_document_review,
         "wiki_pages": len(list(config.wiki_dir.rglob("*.md"))),
+        "watches": watches_total,
+        "watches_active": watches_active,
+        "watches_paused": watches_paused,
+        "watches_failing": watches_failing,
         "workspace_root": str(config.workspace_root),
     }
 
@@ -146,7 +167,7 @@ def list_wiki_canvas_files(config: Config) -> list[str]:
 
 def collect_pages_by_type(config: Config) -> dict[str, list[dict[str, str]]]:
     buckets: dict[str, list[dict[str, str]]] = {
-        "articles": [], "sources": [], "maps": [], "outputs": [], "other": [],
+        "articles": [], "sources": [], "maps": [], "outputs": [], "watches": [], "other": [],
     }
     for page_path in list_wiki_pages(config):
         if page_path in ("index.md", "overview.md", "log.md"):
@@ -175,7 +196,8 @@ def write_index(config: Config, pages_by_type: dict[str, list[dict[str, str]]]) 
     created = _preserved_created(config.wiki_dir / "index.md", now)
     sections = [
         ("Articles", "articles"), ("Sources", "sources"),
-        ("Maps", "maps"), ("Outputs", "outputs"), ("Other", "other"),
+        ("Maps", "maps"), ("Outputs", "outputs"),
+        ("Watches", "watches"), ("Other", "other"),
     ]
     has_content = any(pages_by_type.get(key) for _, key in sections)
     index_fm = {"title": "Index", "type": "index", "created": created, "updated": now}
@@ -297,6 +319,8 @@ def _bucket_for_page(page_type: str, page_path: str) -> str:
         return "maps"
     if t in OUTPUT_PAGE_TYPES or page_path.startswith("outputs/"):
         return "outputs"
+    if t in WATCH_PAGE_TYPES or page_path.startswith("watches/"):
+        return "watches"
     return "other"
 
 
@@ -339,7 +363,6 @@ Prefer `article` / `map` for new generic workspaces unless this topic truly bene
   - `title`
   - `type`
   - `status`
-  - `summary`
   - `created`
   - `updated`
 - Valid `status` values:
@@ -347,12 +370,12 @@ Prefer `article` / `map` for new generic workspaces unless this topic truly bene
   - `emerging`: partially synthesized; multiple signals or sources but still incomplete
   - `stable`: durable reference page with synthesis, explicit support, and no obvious unresolved structural gaps
 - Recommended optional fields when relevant:
+  - `summary` (only when it adds something beyond the first line of the body)
   - `tags`
   - `aliases`
   - `sources`
   - `source_ids`
   - `citations`
-  - `cssclasses`
 - Use `[[Page Title]]` wikilinks only for pages that already exist, unless you are creating the target page in the same pass.
 - Source-backed pages should preserve provenance explicitly.
 

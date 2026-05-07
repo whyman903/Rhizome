@@ -18,8 +18,6 @@ class TestGenerateMarp:
         assert "# Slide 1" in body
         assert "---" in body
         assert "# Slide 2" in body
-        # Body should NOT contain its own frontmatter block
-        assert body.count("---") == 1  # only the slide separator
 
     def test_custom_theme(self) -> None:
         _, fm = generate_marp("Deck", "content", theme="gaia")

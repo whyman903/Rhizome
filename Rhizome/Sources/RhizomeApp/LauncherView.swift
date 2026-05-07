@@ -94,6 +94,8 @@ struct LauncherView: View {
                 }
                 Button("Open Other Workspace…") { model.chooseOtherWorkspace() }
                 Divider()
+                Button("Watches…") { showWatchesPane() }
+                Divider()
                 Button("Quit Rhizome") { NSApplication.shared.terminate(nil) }
             } label: {
                 Image(systemName: "ellipsis")
@@ -347,11 +349,26 @@ struct LauncherView: View {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 14, weight: .regular))
             }
+            EditorialLaunchTile(
+                title: "Watches",
+                caption: "URL pulls",
+                action: { showWatchesPane() }
+            ) {
+                Image(systemName: "binoculars")
+                    .font(.system(size: 14, weight: .regular))
+            }
         }
     }
 
     private func showQueryWindow() {
         dismissMenuBarPopup()
+        openWindow(id: "query-window")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func showWatchesPane() {
+        dismissMenuBarPopup()
+        model.requestWatchesPane()
         openWindow(id: "query-window")
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
@@ -368,7 +385,7 @@ struct LauncherView: View {
 
 // MARK: - Subviews
 
-private struct InsetlessTextEditor: NSViewRepresentable {
+struct InsetlessTextEditor: NSViewRepresentable {
     @Binding var text: String
     let font: NSFont
     let textColor: NSColor

@@ -90,6 +90,10 @@ def _workspace_payload(config, info: dict[str, Any] | None = None) -> dict[str, 
         "unprocessed": info["unprocessed"],
         "needsDocumentReview": info["needs_document_review"],
         "wikiPageCount": info["wiki_pages"],
+        "watches": info.get("watches", 0),
+        "watchesActive": info.get("watches_active", 0),
+        "watchesPaused": info.get("watches_paused", 0),
+        "watchesFailing": info.get("watches_failing", 0),
     }
 
 
@@ -430,7 +434,27 @@ def status(path: str, json_output: bool) -> None:
         "wiki_pages",
     ):
         table.add_row(key.replace("_", " ").title(), str(info[key]))
+    table.add_row("Watches", _format_watches_summary(info))
     console.print(table)
+
+
+def _format_watches_summary(info: dict[str, Any]) -> str:
+    total = info.get("watches", 0)
+    if not total:
+        return "0"
+    parts: list[str] = []
+    active = info.get("watches_active", 0)
+    paused = info.get("watches_paused", 0)
+    failing = info.get("watches_failing", 0)
+    if active:
+        parts.append(f"{active} active")
+    if paused:
+        parts.append(f"{paused} paused")
+    if failing:
+        parts.append(f"{failing} failing")
+    if parts:
+        return f"{total} ({', '.join(parts)})"
+    return str(total)
 
 
 @main.command()
@@ -1466,6 +1490,238 @@ def eval_run(
     console.print(f"[green]Readable report:[/green] {run_path.with_suffix('.md')}")
 
 
+# --- Watches: personalized automated pulls ---
+
+
+@main.group()
+def watch() -> None:
+    """Recurring URL pulls synthesized by Claude into a wiki page."""
+
+
+def _watch_payload(record) -> dict[str, Any]:
+    return record.to_dict()
+
+
+@watch.command("add")
+@click.argument("url")
+@click.option("--frequency", "-f", default="daily", show_default=True, help="hourly, daily, weekly, or 'cron: <expr>' (hourly minimum)")
+@click.option("--intent", "-i", required=True, help="Plain-language description of what to pull and synthesize.")
+@click.option("--title", default=None, help="Optional title override (default derived from URL).")
+@click.option("--tag", "tags", multiple=True, help="Repeat to add tags.")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_add(
+    url: str,
+    frequency: str,
+    intent: str,
+    title: str | None,
+    tags: tuple[str, ...],
+    path: str,
+    json_output: bool,
+) -> None:
+    """Register a new watch and create its wiki page."""
+    from compile.watch import add_watch
+    config = load_config(Path(path).resolve())
+    try:
+        record = add_watch(
+            config,
+            url=url,
+            frequency=frequency,
+            intent=intent,
+            title=title,
+            tags=list(tags),
+        )
+    except ValueError as exc:
+        if json_output:
+            _emit_machine_error(str(exc), context="watch add")
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    if json_output:
+        _emit_json({"ok": True, "watch": _watch_payload(record)})
+        return
+    console.print(f"[green]Watch created:[/green] {record.relative_path}")
+    console.print(f"  next_run: {record.next_run}")
+
+
+@watch.command("list")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_list(path: str, json_output: bool) -> None:
+    from compile.watch import list_watches
+    config = load_config(Path(path).resolve())
+    records = list_watches(config)
+    if json_output:
+        _emit_json({"ok": True, "watches": [_watch_payload(r) for r in records]})
+        return
+    if not records:
+        console.print("[dim]No watches registered.[/dim]")
+        return
+    table = Table(title="Watches")
+    table.add_column("Title")
+    table.add_column("Status")
+    table.add_column("Frequency")
+    table.add_column("Next run")
+    table.add_column("Last status")
+    for r in records:
+        table.add_row(r.title, r.watch_status, r.frequency, r.next_run or "-", r.last_status or "-")
+    console.print(table)
+
+
+@watch.command("show")
+@click.argument("locator")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_show(locator: str, path: str, json_output: bool) -> None:
+    from compile.watch import get_watch
+    config = load_config(Path(path).resolve())
+    try:
+        record = get_watch(config, locator)
+    except FileNotFoundError as exc:
+        if json_output:
+            _emit_machine_error(str(exc), context="watch show")
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    if json_output:
+        _emit_json({"ok": True, "watch": _watch_payload(record)})
+        return
+    console.print(json.dumps(_watch_payload(record), indent=2, sort_keys=True))
+
+
+@watch.command("pause")
+@click.argument("locator")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_pause(locator: str, path: str, json_output: bool) -> None:
+    from compile.watch import pause_watch
+    config = load_config(Path(path).resolve())
+    record = pause_watch(config, locator)
+    if json_output:
+        _emit_json({"ok": True, "watch": _watch_payload(record)})
+        return
+    console.print(f"[yellow]Paused:[/yellow] {record.title}")
+
+
+@watch.command("resume")
+@click.argument("locator")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_resume(locator: str, path: str, json_output: bool) -> None:
+    from compile.watch import resume_watch
+    config = load_config(Path(path).resolve())
+    record = resume_watch(config, locator)
+    if json_output:
+        _emit_json({"ok": True, "watch": _watch_payload(record)})
+        return
+    console.print(f"[green]Resumed:[/green] {record.title} (next_run {record.next_run})")
+
+
+@watch.command("remove")
+@click.argument("locator")
+@click.option("--keep-page/--no-keep-page", default=False, help="Leave the wiki page in place; just unregister the watch.")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_remove(locator: str, keep_page: bool, path: str, json_output: bool) -> None:
+    from compile.watch import remove_watch
+    config = load_config(Path(path).resolve())
+    try:
+        relative = remove_watch(config, locator, keep_page=keep_page)
+    except FileNotFoundError as exc:
+        if json_output:
+            _emit_machine_error(str(exc), context="watch remove")
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    if json_output:
+        _emit_json({"ok": True, "removed": relative, "keep_page": keep_page})
+        return
+    if keep_page:
+        console.print(f"[yellow]Unregistered (page kept):[/yellow] {relative}")
+    else:
+        console.print(f"[red]Removed:[/red] {relative}")
+
+
+@watch.command("run")
+@click.argument("locator")
+@click.option("--force/--no-force", default=False, help="Synthesize even if the fetched content is unchanged.")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--claude", "claude_executable", default="claude", show_default=True, help="Claude executable to run.")
+@click.option("--timeout-seconds", type=click.FloatRange(min=1.0), default=300.0, show_default=True)
+@click.option("--json-output/--no-json-output", default=False)
+def watch_run(
+    locator: str,
+    force: bool,
+    path: str,
+    claude_executable: str,
+    timeout_seconds: float,
+    json_output: bool,
+) -> None:
+    """Run one watch right now."""
+    from compile.watch import run_watch
+    config = load_config(Path(path).resolve())
+    try:
+        event = run_watch(
+            config,
+            locator,
+            force=force,
+            claude_executable=claude_executable,
+            claude_timeout=timeout_seconds,
+        )
+    except FileNotFoundError as exc:
+        if json_output:
+            _emit_machine_error(str(exc), context="watch run")
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    if json_output:
+        _emit_json({"ok": event.get("status") != "failed", "event": event})
+        return
+    status = event.get("status")
+    if status == "ok":
+        console.print(f"[green]Watch ran:[/green] {event['title']}")
+    elif status == "unchanged":
+        console.print(f"[dim]Unchanged (skipped synthesis):[/dim] {event['title']}")
+    elif status == "skipped":
+        console.print(f"[yellow]Skipped (locked):[/yellow] {event['title']}")
+    else:
+        console.print(f"[red]Failed:[/red] {event.get('error') or status}")
+
+
+@watch.command("tick")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--claude", "claude_executable", default="claude", show_default=True, help="Claude executable to run.")
+@click.option("--timeout-seconds", type=click.FloatRange(min=1.0), default=300.0, show_default=True)
+@click.option("--json-stream/--no-json-stream", default=False, help="Emit one JSON event per processed watch (for the Mac app).")
+@click.option("--json-output/--no-json-output", default=False, help="Emit a single JSON summary at the end.")
+def watch_tick(
+    path: str,
+    claude_executable: str,
+    timeout_seconds: float,
+    json_stream: bool,
+    json_output: bool,
+) -> None:
+    """Run every active watch whose next_run is due now."""
+    from compile.watch import tick
+    config = load_config(Path(path).resolve())
+    events = tick(
+        config,
+        claude_executable=claude_executable,
+        claude_timeout=timeout_seconds,
+    )
+    if json_stream:
+        for event in events:
+            _emit_json({"event": event})
+    if json_output:
+        _emit_json({"ok": True, "count": len(events), "events": events})
+    if not json_output and not json_stream:
+        if not events:
+            console.print("[dim]No watches due.[/dim]")
+        for event in events:
+            status = event.get("status")
+            console.print(f"  {status:>9}  {event.get('title')}")
+
+
 # --- Claude Code integration ---
 
 @main.group()
@@ -1647,10 +1903,7 @@ def _extract_for_ingest(config, raw_path: Path, raw_relative: str):
 
 def _source_review_frontmatter(extracted) -> dict[str, str] | None:
     if extracted.requires_document_review and extracted.extraction_method:
-        return {
-            "review_status": "needs_document_review",
-            "extraction_method": extracted.extraction_method,
-        }
+        return {"review_status": "needs_document_review"}
     return None
 
 
@@ -1668,11 +1921,16 @@ def _extract_source_provenance_frontmatter(raw_path: Path) -> dict[str, str] | N
     if comments.get("source") != "notion":
         return None
     frontmatter: dict[str, str] = {}
+    # Only persist the keys that something actually reads:
+    # - notion_page_id: used by `_should_refresh_existing_source_page` to recognize
+    #   a re-sync of the same Notion page.
+    # - notion_url: clickable backlink to the Notion source from Obsidian.
+    # The skip-if-unchanged logic reads `notion_last_edited_time` from the raw
+    # file's HTML comments, so duplicating it (or `notion_synced_at`) into
+    # frontmatter just clutters every Notion-sourced page.
     mapping = {
         "notion_page_id": "notion_page_id",
         "notion_page_url": "notion_url",
-        "notion_last_edited_time": "notion_last_edited_time",
-        "notion_synced_at": "notion_synced_at",
     }
     for comment_key, frontmatter_key in mapping.items():
         value = comments.get(comment_key, "").strip()

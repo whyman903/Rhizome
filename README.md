@@ -110,6 +110,7 @@ Add more sources, ask more questions. The wiki compounds.
 - `compile ingest <file>` — register a raw source and create a source note
 - `compile obsidian search | page | neighbors` — programmatic wiki reads
 - `compile render canvas | marp | chart` — explicit rich-output renderers
+- `compile watch add | list | run | tick` — recurring URL pulls synthesized into a wiki page
 - `compile eval init | run` — manual headless query eval suites with judge-ready JSON output
 - `compile health`, `compile obsidian refresh` — lint and reindex
 
@@ -123,7 +124,7 @@ Three layers, one contract:
 - **`wiki/`** — the LLM-maintained layer: source notes, articles, maps, outputs. Every page here is grounded in something from `raw/`.
 - **`WIKI.md`** — the schema telling Claude how this wiki is structured, what status levels mean, and how to link pages together.
 
-Pages are one of four types: `source` (provenance-anchored, one per raw file), `article` (cross-source synthesis), `map` (navigation hubs), `output` (saved answer, deck, chart, or canvas).
+Pages are one of five types: `source` (provenance-anchored, one per raw file), `article` (cross-source synthesis), `map` (navigation hubs), `output` (saved answer, deck, chart, or canvas), and `watch` (a recurring URL pull, see below).
 
 When you ingest a source, the source note embeds the full extracted text in a collapsed `> [!abstract]- Full extracted text` callout, so future queries can grep the real content — not just a synopsis.
 
@@ -140,8 +141,34 @@ Use these from Rhizome.app or from a Claude Code session launched by the app:
 | `/lint` | Audit: broken links, status honesty, dead-end notes, coverage gaps. |
 | `/synthesize [theme]` | Connect accumulated sources into articles or maps. |
 | `/notion-setup`, `/notion-sync` | Save a Notion scope, then pull matching pages into `raw/notion/`. |
+| `/watch-add`, `/watch-review` | Set up an automated URL pull (URL + frequency + plain-language intent), and audit existing watches for staleness or drift. |
 
 You can hand-edit any of these at `<workspace>/.claude/commands/*.md` or `~/.claude/commands/*.md` — open them from Rhizome's Settings → Claude Commands. Your edits survive app restarts.
+
+---
+
+## Watches — automated pulls
+
+A **watch** is a recurring URL pull tuned by a plain-language intent. Each successful run prepends a dated digest to a `watch`-type wiki page; the raw fetched body is archived under `raw/watches/<slug>/<timestamp>.md` so provenance is preserved.
+
+```bash
+compile watch add https://www.ft.com/markets \
+  --frequency daily \
+  --intent "Pull the top 3 stories. For each, give a 2-sentence summary and flag anything related to AI infra capex."
+```
+
+- Frequency vocabulary: `hourly`, `daily`, `weekly`, or `cron: <minute> <hour> <dom> <mon> <dow>` (hourly minimum — sub-hour cron is rejected).
+- Intent is sent verbatim to Claude as the synthesis instruction. Edit the `watch_intent:` frontmatter field in Obsidian to refine it later.
+- After 3 consecutive failures the watch auto-pauses; bring it back with `compile watch resume "<title>"` once you've fixed the URL.
+- Unchanged content is detected by hash; the watch records `unchanged` and skips Claude on those ticks.
+
+**Mac users:** Rhizome.app installs a launchd agent (`~/Library/LaunchAgents/app.rhizome.watch-tick.plist`) that runs `compile watch tick` every 15 minutes. Open the **Watches…** window from the menu-bar dropdown to add, run, pause, or remove watches.
+
+**Headless / CLI users:** add a cron entry that points at the workspace:
+
+```cron
+*/15 * * * * cd /path/to/wiki && /usr/local/bin/compile watch tick >/dev/null 2>&1
+```
 
 ---
 
