@@ -416,7 +416,7 @@ struct QueryDetailView: View {
                                 action: {
                                     model.selectPendingQuerySession(session)
                                     followUpText = ""
-                                    showSettings = false
+                                    activePane = .conversation
                                 }
                             )
                         }
