@@ -14,8 +14,7 @@ struct RhizomeApp: App {
         let model = AppModel(
             logger: logger,
             installWatchTrigger: { workspaceURL in
-                let sidecarURL = try SidecarLocator.defaultURL()
-                try scheduler.install(sidecarPath: sidecarURL.path, workspaceURL: workspaceURL)
+                try scheduler.install(workspaceURL: workspaceURL)
             }
         )
         self._model = State(initialValue: model)

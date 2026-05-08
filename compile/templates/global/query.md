@@ -26,7 +26,7 @@ Do not ask the user which command to use. Only ask a follow-up if both the curre
    - Explicit artifact request ("build/make/render/create me a deck/chart/canvas") → create the artifact immediately with the relevant `compile render ...` command, then report the created wiki path. Do not ask whether to save it again.
    - Ordinary durable answer with no existing anchor → offer a new `output` page only if it would be reusable later.
 
-2. Run `compile obsidian search` with key terms from the question to find relevant pages.
+2. **Search before answering — no exemptions.** Run at least one `compile obsidian search` (or, for absence/inventory questions, a direct `Grep`/`rg` pass over `wiki/` and `raw/`) before composing any answer. This applies even when the question sounds like generic textbook knowledge ("what's the difference between TCP and UDP?", "how do transformers work?", "what is RAG?"). The wiki frequently has a specific take that overrides the generic one, and skipping the search is a hallucination risk. If the search returns zero relevant hits, say "the wiki has no coverage of X" up front and then answer from web-backed or general knowledge.
 
 3. Read the top few results with `compile obsidian page`. Follow `compile obsidian neighbors` if you need more context on how pages connect.
 

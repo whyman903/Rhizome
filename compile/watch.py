@@ -39,6 +39,42 @@ AUTO_PAUSE_FAILURES = 3
 DEFAULT_CLAUDE_TIMEOUT = 300.0
 DEFAULT_CLAUDE_EXECUTABLE = "claude"
 
+# Pointer file written by the Rhizome.app when the user picks a workspace.
+# `compile watch tick` (run by launchd) reads it when invoked without --path.
+ACTIVE_WORKSPACE_POINTER = (
+    Path.home() / "Library" / "Application Support" / "Rhizome" / "active-workspace"
+)
+
+
+class ActiveWorkspaceUnavailable(RuntimeError):
+    """Raised when the scheduled launchd agent cannot find a workspace to tick."""
+
+
+def resolve_active_workspace() -> Path:
+    """Return the workspace path that scheduled `watch tick` runs should target.
+
+    The Rhizome menu-bar app writes ``ACTIVE_WORKSPACE_POINTER`` when the user
+    selects a workspace so the bundled launchd agent (which has a static plist
+    with no `--path` baked in) can find it.
+    """
+    pointer = ACTIVE_WORKSPACE_POINTER
+    if not pointer.exists():
+        raise ActiveWorkspaceUnavailable(
+            f"No active workspace is set. Pass --path or open a workspace in Rhizome.app first "
+            f"(expected pointer at {pointer})."
+        )
+    text = pointer.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ActiveWorkspaceUnavailable(
+            f"Active workspace pointer at {pointer} is empty. Reopen the workspace in Rhizome.app."
+        )
+    workspace = Path(text).expanduser().resolve()
+    if not workspace.is_dir():
+        raise ActiveWorkspaceUnavailable(
+            f"Active workspace pointer references a missing directory: {workspace}"
+        )
+    return workspace
+
 
 # --------- Frequency parsing -----------------------------------------------------
 

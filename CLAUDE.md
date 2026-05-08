@@ -69,10 +69,11 @@ Set `RHIZOME_SKIP_LAUNCH=1` (or run under `CI`) to skip the post-build app launc
   - `CompileRunning.swift` (protocol), `CompileRunner.swift` (sidecar RPC), `CompileEvent.swift` (streamed ingest events), `WorkspaceInfo.swift`, `WikiSearch.swift`, `WikilinkParser.swift`.
   - `ClaudeQueryRunner.swift` (streaming `claude -p`), `QuerySession.swift` (resumable threads), `ClaudeDispatcher.swift` (Terminal hand-off).
   - `AppModel.swift`, `FeedStore.swift`, `Obsidian.swift` (URL scheme opener), `TerminalLauncher.swift`, `AppLogger.swift`.
-  - `WatchSidecar.swift` (RPC for `compile watch ...`), `WatchScheduler.swift` (launchd plist install/uninstall for the recurring tick), `WatchRecord.swift` (Codable contract for the watch JSON envelopes).
+  - `WatchSidecar.swift` (RPC for `compile watch ...`), `WatchScheduler.swift` (registers the bundled `Contents/Library/LaunchAgents/app.rhizome.watch-tick.plist` via `SMAppService` and writes `~/Library/Application Support/Rhizome/active-workspace` so the static plist can locate the current workspace), `WatchRecord.swift` (Codable contract for the watch JSON envelopes).
 - `Tests/RhizomeCoreTests/` and `Tests/RhizomeAppTests/` — Swift Testing suites covering the sidecar contract, query sessions, markdown rendering, and Obsidian/Terminal launch.
 - `support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
 - `support/Info.plist` / `AppIcon.icns` — bundle metadata.
+- `support/LaunchAgents/app.rhizome.watch-tick.plist` — static SMAppService agent plist; copied into `Rhizome.app/Contents/Library/LaunchAgents/` by `scripts/build.sh`. Uses `BundleProgram` so launchd resolves `compile-bin` relative to the bundle, and reads the active workspace from the pointer file (no `--path` baked in).
 - `scripts/build.sh` — builds sidecar + Swift product, assembles and ad-hoc signs `dist/Rhizome.app`.
 
 ## Development Rules

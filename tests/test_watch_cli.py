@@ -136,6 +136,73 @@ def test_watch_tick_emits_one_event_per_due_watch(
     assert all(e["status"] == "ok" for e in events)
 
 
+def test_watch_tick_uses_cwd_workspace_when_no_path_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cd /path/to/wiki && compile watch tick` keeps working — the cron path."""
+    workspace = tmp_path / "wiki-root"
+    _make_workspace(workspace)
+
+    # Pointer set to a different workspace; cwd should still win.
+    other = tmp_path / "other-wiki"
+    _make_workspace(other)
+    pointer = tmp_path / "active-workspace"
+    pointer.write_text(str(other))
+    monkeypatch.setattr(watch_module, "ACTIVE_WORKSPACE_POINTER", pointer)
+    monkeypatch.chdir(workspace)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["watch", "tick", "--json-stream"])
+    assert result.exit_code == 0, result.output
+
+
+def test_watch_tick_falls_back_to_pointer_when_cwd_lacks_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """launchd runs the agent from a directory that isn't a workspace — pointer wins then."""
+    workspace = tmp_path / "wiki-root"
+    _make_workspace(workspace)
+
+    pointer = tmp_path / "active-workspace"
+    pointer.write_text(str(workspace))
+    monkeypatch.setattr(watch_module, "ACTIVE_WORKSPACE_POINTER", pointer)
+
+    not_a_workspace = tmp_path / "elsewhere"
+    not_a_workspace.mkdir()
+    monkeypatch.chdir(not_a_workspace)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["watch", "tick", "--json-stream"])
+    assert result.exit_code == 0, result.output
+
+
+def test_watch_tick_errors_when_neither_cwd_nor_pointer_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pointer = tmp_path / "missing-pointer"
+    monkeypatch.setattr(watch_module, "ACTIVE_WORKSPACE_POINTER", pointer)
+
+    not_a_workspace = tmp_path / "elsewhere"
+    not_a_workspace.mkdir()
+    monkeypatch.chdir(not_a_workspace)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["watch", "tick", "--json-stream"])
+    assert result.exit_code != 0
+    assert "active workspace" in result.output.lower()
+
+
+def test_resolve_active_workspace_rejects_missing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pointer = tmp_path / "active-workspace"
+    pointer.write_text(str(tmp_path / "does-not-exist"))
+    monkeypatch.setattr(watch_module, "ACTIVE_WORKSPACE_POINTER", pointer)
+
+    with pytest.raises(watch_module.ActiveWorkspaceUnavailable):
+        watch_module.resolve_active_workspace()
+
+
 def test_watch_add_rejects_sub_hour_cron(tmp_path: Path) -> None:
     _make_workspace(tmp_path)
     runner = CliRunner()

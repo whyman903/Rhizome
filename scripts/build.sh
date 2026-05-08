@@ -31,13 +31,15 @@ swift build --package-path "$APP_ROOT" -c release --product Rhizome >/dev/null
 APP_BIN_DIR="$(swift build --package-path "$APP_ROOT" -c release --show-bin-path)"
 APP_EXECUTABLE="$APP_BIN_DIR/Rhizome"
 
-mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Library/LaunchAgents"
 cp "$APP_EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/Rhizome"
 cp "$APP_ROOT/support/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$APP_ROOT/support/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 cp -R "$APP_ROOT/Sources/RhizomeApp/Resources/web" "$APP_BUNDLE/Contents/Resources/web"
 cp "$SIDECAR_DIST/compile-bin" "$APP_BUNDLE/Contents/Resources/compile-bin"
 cp -R "$ROOT/compile/templates" "$APP_BUNDLE/Contents/Resources/templates"
+cp "$APP_ROOT/support/LaunchAgents/app.rhizome.watch-tick.plist" \
+   "$APP_BUNDLE/Contents/Library/LaunchAgents/app.rhizome.watch-tick.plist"
 
 chmod +x "$APP_BUNDLE/Contents/MacOS/Rhizome" "$APP_BUNDLE/Contents/Resources/compile-bin"
 

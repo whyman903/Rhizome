@@ -62,8 +62,9 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         and save that artifact immediately; after rendering, report the created wiki path and do \
         not ask whether to save it again. Full Bash is trusted for wiki research and confirmed \
         compile-based writes. Use Bash, Task subagents, Grep, Glob, LS, Read, \
-        WebSearch, and WebFetch when useful. Prefer the wiki first, then fill gaps from \
-        web-backed or general knowledge with clear labels. \
+        WebSearch, and WebFetch when useful. Always search the wiki before answering — even when \
+        the question sounds like generic textbook knowledge — then fill gaps from web-backed or \
+        general knowledge with clear labels. \
         Use `compile obsidian search`, `compile obsidian page`, and `compile obsidian neighbors` \
         through Bash for semantic wiki discovery and page reads; if the global `compile` command \
         is unavailable, use `uv run compile ...`. Prefer Read, Glob, and Grep for file inspection; \
@@ -99,6 +100,7 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         - Use KaTeX-compatible LaTeX math notation, not Unicode math symbols. Inline math must include literal backslash delimiters like `\\(...\\)`, not bare `( ... )`; use `$$...$$` or `\\[...\\]` for display math. Use explicit subscripts/superscripts such as `x_s`, `\\hat{S}_{ij}`, and `\\sum_{i=1}^{h}`. Do not emit malformed TeX like `\\hat{S}{ij}`, `\\mathbf{x}s`, `\\sum{i=1}^{h}`, or `\\text{softmax}{...}` when you mean a subscript or operator argument.
 
         Use the right research pattern for the request:
+        - Search before answering — no exemptions. Run at least one `compile obsidian search` (or, for absence/inventory questions, a direct `Grep`/`rg` over `wiki/` and `raw/`) before composing any answer. This applies even when the question sounds like generic textbook knowledge ("what's the difference between TCP and UDP?", "how do transformers work?", "what is RAG?"). The wiki frequently has a specific take that overrides the generic one, and skipping the search is a hallucination risk. If the search returns zero relevant hits, say "the wiki has no coverage of X" up front and then answer from web-backed or general knowledge.
         - For "explain the difference between X and Y", search each term and likely aliases, then compare the best wiki evidence.
         - For "how many notes", "find them all", inventory, count, list-all, or duplicate queries, start with a broad aggregation pass such as `rg -l`, `grep -rl`, `grep -rh "^sources:"`, `find`, or `wc`; dedupe matching wiki paths, define the inclusion rule, then inspect candidates.
         - For quote, verbatim, or "in their own words" queries, read the source note and raw source early when available; do not rely only on extracted snippets for exact wording.
@@ -217,6 +219,8 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
                         if let preview = lineSummary.toolResultPreview {
                             summary.lastToolResultPreview = preview
                         }
+                        summary.lastParsedEventAt = Date()
+                        summary.totalParsedLines += 1
                     case .unparsed:
                         summary.appendUnparsedLine(line)
                     }
@@ -274,7 +278,19 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             }
             await onEvent(.failed(message: message))
         } else if !stdoutSummary.sawFinished {
-            if let recovered = await Self.recoverTranscriptAnswer(
+            Self.logMissingResultDiagnostics(
+                stdoutSummary: stdoutSummary,
+                stdoutTail: stdoutTail,
+                processExitedAt: Date(),
+                logger: logger
+            )
+            if await Self.tryFinalizeFromUnparsedTail(
+                stdoutTail: stdoutTail,
+                logger: logger,
+                onEvent: onEvent
+            ) {
+                logger.log("ClaudeQueryRunner: completed from stranded result line in unparsed tail")
+            } else if let recovered = await Self.recoverTranscriptAnswer(
                 sessionID: stdoutSummary.sessionID,
                 workspaceURL: workspaceURL,
                 transcriptRoot: transcriptRootProvider(),
@@ -407,6 +423,8 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
         var sessionID: String?
         var lastTextOnlyAssistantText: String?
         var lastToolResultPreview: String?
+        var lastParsedEventAt: Date?
+        var totalParsedLines = 0
 
         var unparsedTail: String {
             String(decoding: unparsedBuffer, as: UTF8.self)
@@ -526,6 +544,60 @@ public final class ClaudeQueryRunner: ClaudeQueryRunning, @unchecked Sendable {
             logger.log("ClaudeQueryRunner unknown event: \(type)")
         }
         return .parsed(summary)
+    }
+
+    private static func tryFinalizeFromUnparsedTail(
+        stdoutTail: String,
+        logger: AppLogger,
+        onEvent: @escaping @Sendable (ClaudeQueryEvent) async -> Void
+    ) async -> Bool {
+        let lines = stdoutTail
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0) }
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !lines.isEmpty else { return false }
+
+        for line in lines {
+            let result = await parseStreamLine(line: line, logger: logger, onEvent: onEvent)
+            if case .parsed(let summary) = result, summary.emittedFinished {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func logMissingResultDiagnostics(
+        stdoutSummary: StdoutSummary,
+        stdoutTail: String,
+        processExitedAt: Date,
+        logger: AppLogger
+    ) {
+        let tailBytes = stdoutTail.utf8.count
+        let tailSuffix = String(stdoutTail.suffix(200))
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        let tailParsesAsJSON: Bool = {
+            let trimmed = stdoutTail.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return false }
+            return (try? JSONSerialization.jsonObject(with: data)) != nil
+        }()
+        let msSinceLastEvent: String = {
+            guard let last = stdoutSummary.lastParsedEventAt else { return "n/a" }
+            return String(format: "%.0f", processExitedAt.timeIntervalSince(last) * 1000)
+        }()
+        let hasTextOnlyFinal = (stdoutSummary.lastTextOnlyAssistantText?.isEmpty == false)
+
+        logger.log(
+            "ClaudeQueryRunner: result envelope missing — "
+                + "tailBytes=\(tailBytes) "
+                + "tailParsesAsJSON=\(tailParsesAsJSON) "
+                + "hasTextOnlyFinal=\(hasTextOnlyFinal) "
+                + "sawAssistantText=\(stdoutSummary.sawAssistantText) "
+                + "sawToolCall=\(stdoutSummary.sawToolCall) "
+                + "parsedLines=\(stdoutSummary.totalParsedLines) "
+                + "msSinceLastEvent=\(msSinceLastEvent) "
+                + "tailSuffix=\"\(tailSuffix)\""
+        )
     }
 
     private static func recoverAssistantText(fromUnparsedTail tail: String) -> String? {

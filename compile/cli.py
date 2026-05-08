@@ -1689,21 +1689,39 @@ def watch_run(
 
 
 @watch.command("tick")
-@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option(
+    "--path", "-p", default=None,
+    help=(
+        "Workspace root. Defaults to the current directory when it contains a workspace, "
+        "otherwise to the Rhizome menu-bar app's active workspace pointer."
+    ),
+)
 @click.option("--claude", "claude_executable", default="claude", show_default=True, help="Claude executable to run.")
 @click.option("--timeout-seconds", type=click.FloatRange(min=1.0), default=300.0, show_default=True)
 @click.option("--json-stream/--no-json-stream", default=False, help="Emit one JSON event per processed watch (for the Mac app).")
 @click.option("--json-output/--no-json-output", default=False, help="Emit a single JSON summary at the end.")
 def watch_tick(
-    path: str,
+    path: str | None,
     claude_executable: str,
     timeout_seconds: float,
     json_stream: bool,
     json_output: bool,
 ) -> None:
     """Run every active watch whose next_run is due now."""
-    from compile.watch import tick
-    config = load_config(Path(path).resolve())
+    from compile.watch import ActiveWorkspaceUnavailable, resolve_active_workspace, tick
+    if path is not None:
+        # Explicit --path always wins, exactly as the other watch subcommands behave.
+        config = load_config(Path(path).resolve())
+    else:
+        try:
+            # Preserve the legacy `cd /path/to/wiki && compile watch tick` workflow.
+            config = load_config(Path.cwd())
+        except FileNotFoundError:
+            try:
+                workspace = resolve_active_workspace()
+            except ActiveWorkspaceUnavailable as exc:
+                raise click.UsageError(str(exc)) from exc
+            config = load_config(workspace)
     events = tick(
         config,
         claude_executable=claude_executable,

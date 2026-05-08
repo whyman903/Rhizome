@@ -45,41 +45,52 @@ final class WatchTests: XCTestCase {
         XCTAssertNil(event.error)
     }
 
-    // MARK: - WatchScheduler plist content
+    // MARK: - WatchScheduler active-workspace pointer
 
-    func testRenderPlistContainsSidecarAndWorkspacePaths() {
-        let scheduler = WatchScheduler(
-            label: "test.watch",
-            intervalSeconds: 600,
-            logURL: URL(fileURLWithPath: "/tmp/log.log"),
-            plistURL: URL(fileURLWithPath: "/tmp/plist.plist"),
-            logger: nil
+    /// `writePointer` is the only piece of `install()` we exercise from tests:
+    /// `install()` would also bootout `~/Library/LaunchAgents/app.rhizome.watch-tick.plist`
+    /// and call SMAppService.register(), both of which can mutate real launchd
+    /// state on the developer's machine.
+    func testWritePointerStoresStandardizedWorkspacePath() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let pointerURL = tmp.appendingPathComponent("active-workspace")
+        let workspace = tmp.appendingPathComponent("wiki", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let scheduler = WatchScheduler(pointerURL: pointerURL, logger: nil)
+        try scheduler.writePointer(workspaceURL: workspace)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pointerURL.path))
+        let written = try String(contentsOf: pointerURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(
+            written,
+            workspace.resolvingSymlinksInPath().standardizedFileURL.path
         )
-        let plist = scheduler.renderPlist(
-            sidecarPath: "/usr/local/bin/compile-bin",
-            workspaceURL: URL(fileURLWithPath: "/Users/test/wiki")
-        )
-        XCTAssertTrue(plist.contains("<string>/usr/local/bin/compile-bin</string>"))
-        XCTAssertTrue(plist.contains("<string>/Users/test/wiki</string>"))
-        XCTAssertTrue(plist.contains("<integer>600</integer>"))
-        XCTAssertTrue(plist.contains("<key>Label</key>\n    <string>test.watch</string>"))
-        XCTAssertTrue(plist.contains("--json-stream"))
     }
 
-    func testRenderPlistEscapesXMLSpecialCharsInPaths() {
-        let scheduler = WatchScheduler(
-            label: "test.watch",
-            intervalSeconds: 900,
-            logURL: URL(fileURLWithPath: "/tmp/l.log"),
-            plistURL: URL(fileURLWithPath: "/tmp/p.plist"),
-            logger: nil
-        )
-        let plist = scheduler.renderPlist(
-            sidecarPath: "/bin/compile",
-            workspaceURL: URL(fileURLWithPath: "/Users/test & friends/wiki")
-        )
-        XCTAssertTrue(plist.contains("/Users/test &amp; friends/wiki"))
-        XCTAssertFalse(plist.contains("/Users/test & friends/wiki"))
+    func testWritePointerCreatesParentDirectory() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let pointerURL = tmp
+            .appendingPathComponent("nested", isDirectory: true)
+            .appendingPathComponent("deeper", isDirectory: true)
+            .appendingPathComponent("active-workspace")
+        let workspace = FileManager.default.temporaryDirectory
+        let scheduler = WatchScheduler(pointerURL: pointerURL, logger: nil)
+        try scheduler.writePointer(workspaceURL: workspace)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pointerURL.path))
+    }
+
+    func testDefaultPointerURLLivesUnderApplicationSupport() {
+        let url = WatchScheduler.defaultPointerURL()
+        XCTAssertTrue(url.path.hasSuffix("Library/Application Support/Rhizome/active-workspace"))
     }
 
     // MARK: - WatchSidecar end-to-end via fake binary

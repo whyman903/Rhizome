@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>app.rhizome.watch-tick</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.walkerhyman.rhizome</string>
+    </array>
+    <key>BundleProgram</key>
+    <string>Contents/Resources/compile-bin</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>compile-bin</string>
+        <string>watch</string>
+        <string>tick</string>
+        <string>--json-stream</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

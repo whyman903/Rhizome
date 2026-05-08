@@ -162,7 +162,7 @@ compile watch add https://www.ft.com/markets \
 - After 3 consecutive failures the watch auto-pauses; bring it back with `compile watch resume "<title>"` once you've fixed the URL.
 - Unchanged content is detected by hash; the watch records `unchanged` and skips Claude on those ticks.
 
-**Mac users:** Rhizome.app installs a launchd agent (`~/Library/LaunchAgents/app.rhizome.watch-tick.plist`) that runs `compile watch tick` every 15 minutes. Open the **Watches…** window from the menu-bar dropdown to add, run, pause, or remove watches.
+**Mac users:** Rhizome.app registers a bundled launchd agent (`Rhizome.app/Contents/Library/LaunchAgents/app.rhizome.watch-tick.plist`) via `SMAppService` that runs `compile watch tick` every 15 minutes against the workspace you've selected in the menu bar. Open the **Watches…** window from the menu-bar dropdown to add, run, pause, or remove watches. To disable the schedule, toggle Rhizome off under System Settings → General → Login Items & Extensions.
 
 **Headless / CLI users:** add a cron entry that points at the workspace:
 
