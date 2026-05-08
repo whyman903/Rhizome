@@ -308,6 +308,7 @@ public enum ObsidianOpener {
             return .notInstalled
         }
         if openGraphUsingCLI(workspaceURL: workspaceURL) {
+            activateObsidian()
             return .opened
         }
         guard ObsidianAdvancedURIInstaller.isInstalledAndEnabled(in: workspaceURL) else {
@@ -375,6 +376,19 @@ public enum ObsidianOpener {
             return true
         } catch {
             return false
+        }
+    }
+
+    private static func activateObsidian() {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "md.obsidian")
+        if let app = running.first {
+            app.activate()
+            return
+        }
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "md.obsidian") {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
         }
     }
 

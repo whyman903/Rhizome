@@ -460,6 +460,7 @@ def _setup_obsidian(root: Path) -> None:
         "useMarkdownLinks": False, "showLineNumber": True,
         "attachmentFolderPath": "raw/assets", "newLinkFormat": "shortest",
         "alwaysUpdateLinks": True,
+        "userIgnoreFilters": ["raw/", "category/"],
     }, indent=2))
 
     (obs / "core-plugins.json").write_text(json.dumps([

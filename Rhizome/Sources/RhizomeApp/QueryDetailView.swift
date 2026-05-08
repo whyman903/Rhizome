@@ -704,7 +704,7 @@ private struct RhizomeLogo: View {
         (1, 5), (1, 6), (1, 7),
         (4, 7), (3, 5),
     ]
-    private let pulseOrder = [2, 0, 3, 5, 1, 6, 7, 4]
+    private let pulseOrder = [2, 0, 3, 5, 1, 6, 1, 7, 4, 0]
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
@@ -729,10 +729,9 @@ private struct RhizomeLogo: View {
             var path = Path()
             path.move(to: CGPoint(x: xOffset + nodes[a].x * scale, y: yOffset + nodes[a].y * scale))
             path.addLine(to: CGPoint(x: xOffset + nodes[b].x * scale, y: yOffset + nodes[b].y * scale))
-            let activity = max(pulseAmount(for: a, elapsed: elapsed), pulseAmount(for: b, elapsed: elapsed))
             context.stroke(
                 path,
-                with: .color(color.opacity(0.45 + activity * 0.25)),
+                with: .color(color),
                 style: StrokeStyle(lineWidth: edgeWidth, lineCap: .round)
             )
         }
@@ -765,24 +764,25 @@ private struct RhizomeLogo: View {
     }
 
     private func pulseAmount(for nodeIndex: Int, elapsed: TimeInterval) -> Double {
-        guard let orderIndex = pulseOrder.firstIndex(of: nodeIndex) else {
-            return 0
-        }
-
         let stepDuration = 0.85
         let cycleDuration = stepDuration * Double(pulseOrder.count)
-        let nodeTime = Double(orderIndex) * stepDuration
-        let age = (elapsed - nodeTime).truncatingRemainder(dividingBy: cycleDuration)
-        let normalizedAge = age >= 0 ? age : age + cycleDuration
-
         let pulseWindow = 1.7
-        guard normalizedAge < pulseWindow else {
-            return 0
-        }
 
-        let attack = min(normalizedAge / 0.45, 1)
-        let fade = max(0, 1 - ((normalizedAge - 0.45) / (pulseWindow - 0.45)))
-        return max(0, min(1, attack * fade))
+        var maxActivity: Double = 0
+        for (orderIndex, slot) in pulseOrder.enumerated() where slot == nodeIndex {
+            let nodeTime = Double(orderIndex) * stepDuration
+            let age = (elapsed - nodeTime).truncatingRemainder(dividingBy: cycleDuration)
+            let normalizedAge = age >= 0 ? age : age + cycleDuration
+            guard normalizedAge < pulseWindow else { continue }
+
+            let attack = min(normalizedAge / 0.45, 1)
+            let fade = max(0, 1 - ((normalizedAge - 0.45) / (pulseWindow - 0.45)))
+            let activity = max(0, min(1, attack * fade))
+            if activity > maxActivity {
+                maxActivity = activity
+            }
+        }
+        return maxActivity
     }
 }
 
@@ -806,7 +806,7 @@ private struct QueryGraphLoadingIndicator: View {
         (1, 5), (1, 6), (1, 7),
         (4, 7), (3, 5),
     ]
-    private let pulseOrder = [2, 0, 3, 5, 1, 6, 7, 4]
+    private let pulseOrder = [2, 0, 3, 5, 1, 6, 1, 7, 4, 0]
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
@@ -872,23 +872,24 @@ private struct QueryGraphLoadingIndicator: View {
     }
 
     private func pulseAmount(for nodeIndex: Int, elapsed: TimeInterval) -> Double {
-        guard let orderIndex = pulseOrder.firstIndex(of: nodeIndex) else {
-            return 0
-        }
-
         let stepDuration = 0.23
         let cycleDuration = stepDuration * Double(pulseOrder.count)
-        let nodeTime = Double(orderIndex) * stepDuration
-        let age = (elapsed - nodeTime).truncatingRemainder(dividingBy: cycleDuration)
-        let normalizedAge = age >= 0 ? age : age + cycleDuration
 
-        guard normalizedAge < 0.48 else {
-            return 0
+        var maxActivity: Double = 0
+        for (orderIndex, slot) in pulseOrder.enumerated() where slot == nodeIndex {
+            let nodeTime = Double(orderIndex) * stepDuration
+            let age = (elapsed - nodeTime).truncatingRemainder(dividingBy: cycleDuration)
+            let normalizedAge = age >= 0 ? age : age + cycleDuration
+            guard normalizedAge < 0.48 else { continue }
+
+            let attack = min(normalizedAge / 0.12, 1)
+            let fade = max(0, 1 - ((normalizedAge - 0.12) / 0.36))
+            let activity = max(0, min(1, attack * fade))
+            if activity > maxActivity {
+                maxActivity = activity
+            }
         }
-
-        let attack = min(normalizedAge / 0.12, 1)
-        let fade = max(0, 1 - ((normalizedAge - 0.12) / 0.36))
-        return max(0, min(1, attack * fade))
+        return maxActivity
     }
 
     private func point(
