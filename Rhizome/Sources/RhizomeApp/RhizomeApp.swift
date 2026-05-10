@@ -37,6 +37,14 @@ struct RhizomeApp: App {
         }
         .defaultSize(width: 620, height: 600)
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("New Conversation Tab") {
+                    model.requestNewQueryTab()
+                }
+                .keyboardShortcut("t", modifiers: .command)
+            }
+        }
 
         MenuBarExtra {
             LauncherView(model: model)

@@ -81,6 +81,13 @@ def _emit_json(payload: dict[str, Any]) -> None:
     click.echo(json.dumps(payload, sort_keys=True))
 
 
+def _truncate_text(value: str, max_chars: int) -> tuple[str, bool]:
+    if len(value) <= max_chars:
+        return value, False
+    suffix = "\n\n[Truncated. Run `compile obsidian page` for the full page.]"
+    return value[: max(0, max_chars - len(suffix))].rstrip() + suffix, True
+
+
 def _workspace_payload(config, info: dict[str, Any] | None = None) -> dict[str, Any]:
     info = info or get_status(config)
     return {
@@ -767,6 +774,23 @@ def obsidian() -> None:
     """Inspect Obsidian vault metadata and graph quality."""
 
 
+def _search_obsidian_pages(root: Path, query: str, *, limit: int):
+    connector = ObsidianConnector(root)
+    if connector.layout == "compile_workspace":
+        config = load_config(connector.root)
+        if search_index_exists(config):
+            hits = _merge_search_hits(
+                primary=search_pdf_index(config, query, limit=limit, connector=connector),
+                secondary=connector.search(query, limit=limit),
+                limit=limit,
+            )
+        else:
+            hits = connector.search(query, limit=limit)
+    else:
+        hits = connector.search(query, limit=limit)
+    return connector, hits
+
+
 @obsidian.command("inspect")
 @click.option("--path", "-p", default=".")
 @click.option("--json-output/--no-json-output", default=False)
@@ -808,19 +832,7 @@ def obsidian_inspect(path: str, json_output: bool) -> None:
 def obsidian_search(query: str, path: str, limit: int, json_output: bool) -> None:
     """Search wiki pages."""
     root = Path(path).resolve()
-    connector = ObsidianConnector(root)
-    if connector.layout == "compile_workspace":
-        config = load_config(connector.root)
-        if search_index_exists(config):
-            hits = _merge_search_hits(
-                primary=search_pdf_index(config, query, limit=limit, connector=connector),
-                secondary=connector.search(query, limit=limit),
-                limit=limit,
-            )
-        else:
-            hits = connector.search(query, limit=limit)
-    else:
-        hits = connector.search(query, limit=limit)
+    _, hits = _search_obsidian_pages(root, query, limit=limit)
     if not hits:
         if json_output:
             _emit_json({"ok": True, "hits": []})
@@ -832,6 +844,101 @@ def obsidian_search(query: str, path: str, limit: int, json_output: bool) -> Non
         return
     for hit in hits:
         console.print(f"  {hit.title} ({hit.page_type}) — {hit.snippet[:80]}")
+
+
+@obsidian.command("research")
+@click.argument("query")
+@click.option("--path", "-p", default=".")
+@click.option("--limit", "-n", type=click.IntRange(min=1), default=10, show_default=True)
+@click.option("--read", "read_count", type=click.IntRange(min=0, max=10), default=3, show_default=True)
+@click.option("--max-chars", type=click.IntRange(min=500), default=12000, show_default=True)
+@click.option("--neighbors/--no-neighbors", default=False, show_default=True)
+@click.option("--json-output/--no-json-output", default=False)
+def obsidian_research(
+    query: str,
+    path: str,
+    limit: int,
+    read_count: int,
+    max_chars: int,
+    neighbors: bool,
+    json_output: bool,
+) -> None:
+    """Search, read top wiki pages, and optionally include graph context."""
+    root = Path(path).resolve()
+    connector, hits = _search_obsidian_pages(root, query, limit=limit)
+    selected_hits = hits[:read_count]
+    page_payloads: list[dict[str, Any]] = []
+
+    for hit in selected_hits:
+        try:
+            page = connector.get_page(hit.relative_path)
+        except (FileNotFoundError, ValueError):
+            continue
+        page_payload = page.to_dict(include_body=True)
+        body, truncated = _truncate_text(str(page_payload.get("body") or ""), max_chars)
+        page_payload["body"] = body
+        page_payload["body_truncated"] = truncated
+        page_payload["max_chars"] = max_chars
+
+        item: dict[str, Any] = {
+            "hit": hit.to_dict(),
+            "page": page_payload,
+        }
+        if neighbors:
+            item["neighbors"] = connector.get_neighborhood(hit.relative_path).to_dict(include_body=False)
+        page_payloads.append(item)
+
+    if json_output:
+        _emit_json({
+            "ok": True,
+            "query": query,
+            "limit": limit,
+            "read": read_count,
+            "max_chars": max_chars,
+            "neighbors": neighbors,
+            "hits": [hit.to_dict() for hit in hits],
+            "pages": page_payloads,
+        })
+        return
+
+    if not hits:
+        console.print(f"[yellow]No matches:[/yellow] {query}")
+        return
+
+    console.print(f"[bold]Search results for:[/bold] {query}")
+    for index, hit in enumerate(hits, start=1):
+        reasons = ", ".join(hit.reasons)
+        console.print(
+            f"{index:>2}. {hit.title} ({hit.page_type}, score {hit.score})"
+            + (f" — {reasons}" if reasons else "")
+        )
+        if hit.snippet:
+            console.print(f"    {hit.snippet[:180]}")
+
+    if not page_payloads:
+        return
+
+    from rich.markdown import Markdown
+
+    for item in page_payloads:
+        page = item["page"]
+        console.rule(f"{page['title']} ({page['page_type']}, {page['word_count']} words)")
+        if neighbors and "neighbors" in item:
+            neighborhood = item["neighbors"]["neighborhood"]
+            links = neighborhood.get("outbound_pages") or []
+            backlinks = neighborhood.get("backlinks") or []
+            sources = neighborhood.get("supporting_source_pages") or []
+            if links:
+                console.print(f"Links to: {', '.join(links[:10])}")
+            if backlinks:
+                console.print(f"Linked from: {', '.join(backlinks[:10])}")
+            if sources:
+                console.print(f"Sources: {', '.join(sources[:10])}")
+        body = str(page.get("body") or "")
+        if body:
+            console.print(Markdown(body))
+        if page.get("body_truncated"):
+            console.print("[yellow]Body truncated. Run `compile obsidian page` for the full page.[/yellow]")
 
 
 @obsidian.command("page")

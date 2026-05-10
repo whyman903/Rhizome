@@ -140,6 +140,61 @@ def test_obsidian_connector_search_and_neighbors(tmp_path: Path) -> None:
     assert any(edge.source == "Planner-Executor Architecture" and edge.target == "Tool-First Architecture" for edge in graph.edges)
 
 
+def test_obsidian_research_batches_search_pages_and_neighbors(tmp_path: Path) -> None:
+    init_workspace(tmp_path, "Test Topic", "Connector coverage.")
+
+    _write_page(
+        tmp_path / "wiki" / "articles" / "planner-executor-architecture.md",
+        "Planner-Executor Architecture",
+        "article",
+        (
+            "Planner executor retrieval uses a planner to decompose the task "
+            "and a retrieval worker to gather grounded context.\n\n"
+            "See [[Grounding Source]].\n\n"
+            + "Evidence detail. " * 80
+        ),
+    )
+    _write_page(
+        tmp_path / "wiki" / "sources" / "grounding-source.md",
+        "Grounding Source",
+        "source",
+        "Primary source evidence for grounded retrieval.",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "obsidian",
+            "research",
+            "planner executor retrieval",
+            "--path",
+            str(tmp_path),
+            "--limit",
+            "5",
+            "--read",
+            "1",
+            "--max-chars",
+            "500",
+            "--neighbors",
+            "--json-output",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    assert payload["hits"][0]["title"] == "Planner-Executor Architecture"
+    assert len(payload["pages"]) == 1
+    page = payload["pages"][0]["page"]
+    assert page["title"] == "Planner-Executor Architecture"
+    assert page["body_truncated"] is True
+    assert "planner to decompose" in page["body"]
+    neighbors = payload["pages"][0]["neighbors"]["neighborhood"]
+    assert "Grounding Source" in neighbors["outbound_pages"]
+    assert "Grounding Source" in neighbors["supporting_source_pages"]
+
+
 def test_obsidian_connector_reads_backend_metadata_neighbors(tmp_path: Path) -> None:
     workspace_root = tmp_path / "demo"
     pages_dir = workspace_root / "pages"
