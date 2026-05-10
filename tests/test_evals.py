@@ -55,8 +55,8 @@ def test_starter_suite_is_written_and_loaded(tmp_path: Path) -> None:
     assert suite.name == "query-quality"
     assert len(suite.queries) == 26
     assert suite.queries[0] == {
-        "id": "tcp-udp",
-        "query": "what's the difference between TCP and UDP?",
+        "id": "wiki-first-short-lookup",
+        "query": "pick one concrete topic already in the wiki and explain it in three sentences",
     }
 
 
@@ -137,16 +137,16 @@ def test_static_workflow_flags_catch_save_offer_absence_and_current_gaps() -> No
 
 def test_static_workflow_flags_do_not_treat_topics_as_freshness() -> None:
     flags = analyze_workflow_flags(
-        query="do I have anything in the wiki on quantum computing?",
-        answer="Your wiki has no notes on quantum computing. Here's a general knowledge summary.",
+        query="do I have anything in the wiki on placeholder topic?",
+        answer="Your wiki has no notes on placeholder topic. Here's a general knowledge summary.",
         tool_calls=[
             {
                 "name": "Bash",
-                "input": {"command": 'compile obsidian search "quantum computing"'},
+                "input": {"command": 'compile obsidian search "placeholder topic"'},
             },
             {
                 "name": "Bash",
-                "input": {"command": 'rg -ni "quantum computing|qubit" wiki raw'},
+                "input": {"command": 'rg -ni "placeholder topic|alias" wiki raw'},
             },
         ],
     )
@@ -191,16 +191,16 @@ def test_static_workflow_flags_do_not_treat_output_page_status_as_save_offer() -
 
 def test_static_workflow_flags_require_direct_search_to_target_wiki_or_raw() -> None:
     flags = analyze_workflow_flags(
-        query="summarize my notes on quantum computing",
-        answer="No notes in your wiki cover quantum computing.",
+        query="summarize my notes on placeholder topic",
+        answer="No notes in your wiki cover placeholder topic.",
         tool_calls=[
             {
                 "name": "Bash",
-                "input": {"command": 'compile obsidian search "quantum computing"'},
+                "input": {"command": 'compile obsidian search "placeholder topic"'},
             },
             {
                 "name": "Grep",
-                "input": {"pattern": "quantum", "path": "/tmp"},
+                "input": {"pattern": "placeholder", "path": "/tmp"},
             },
         ],
     )
@@ -227,12 +227,12 @@ def test_static_workflow_flags_refresh_does_not_verify_save_claim() -> None:
 
 def test_static_workflow_flags_catch_inventory_search_thrash() -> None:
     flags = analyze_workflow_flags(
-        query="how many source notes do I have that engage contractualism?",
+        query="how many source notes do I have that engage recurring theme?",
         answer="I found 11 source notes.",
         tool_calls=[
             {
                 "name": "Bash",
-                "input": {"command": f'compile obsidian search "contractualism {index}"'},
+                "input": {"command": f'compile obsidian search "recurring theme {index}"'},
             }
             for index in range(11)
         ],
@@ -263,7 +263,7 @@ def test_static_workflow_flags_inventory_query_uses_word_boundaries() -> None:
 
 def test_static_workflow_flags_ls_aggregation_requires_ls_command() -> None:
     flags = analyze_workflow_flags(
-        query="how many source notes do I have that engage contractualism?",
+        query="how many source notes do I have that engage recurring theme?",
         answer="I found several source notes.",
         tool_calls=[
             {
@@ -279,16 +279,16 @@ def test_static_workflow_flags_ls_aggregation_requires_ls_command() -> None:
 
 def test_static_workflow_flags_catch_source_accounting_without_named_reads() -> None:
     flags = analyze_workflow_flags(
-        query="show which sources support which moves: Frankfurt, Nguyen, Anderson, and Farkas",
+        query="show which sources support which claims: Source Alpha, Source Beta, Source Gamma",
         answer="Here is the source accounting.",
         tool_calls=[
             {
                 "name": "Bash",
-                "input": {"command": 'compile obsidian search "LLM bullshitters epistemic pollution"'},
+                "input": {"command": 'compile obsidian search "main article source accounting"'},
             },
             {
                 "name": "Bash",
-                "input": {"command": 'compile obsidian page "LLM Bullshitters Paper"'},
+                "input": {"command": 'compile obsidian page "Main Article"'},
             },
         ],
     )
@@ -689,9 +689,9 @@ def test_eval_init_and_dry_run_cli(tmp_path: Path) -> None:
     dry_run = runner.invoke(main, ["eval", "run", "query-quality", "--path", str(tmp_path), "--dry-run", "--limit", "2"])
     assert dry_run.exit_code == 0
     assert "query-quality" in dry_run.output
-    assert "tcp-udp" in dry_run.output
-    assert "codebleu-side" in dry_run.output
-    assert "philosophy-topic-count" not in dry_run.output
+    assert "wiki-first-short-lookup" in dry_run.output
+    assert "acronym-disambiguation" in dry_run.output
+    assert "tcp-udp" not in dry_run.output
 
 
 def test_eval_run_cli_uses_fake_claude_and_writes_json(tmp_path: Path) -> None:

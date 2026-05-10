@@ -303,11 +303,73 @@ class TestIngestCommand:
         source_text = (tmp_path / "wiki" / "sources" / "Product Notes.md").read_text()
         assert "notion_page_id: 1429989f-e8ac-4eff-bc8f-57f56486db54" in source_text
         assert "notion_url: https://www.notion.so/product-notes" in source_text
-        # last_edited_time / synced_at stay in the raw file's HTML comments
-        # (where the skip-if-unchanged check actually reads them) and are no
-        # longer duplicated into the source-note frontmatter.
-        assert "notion_last_edited_time" not in source_text
+        assert "notion_last_edited_time: '2026-04-12T12:00:00Z'" in source_text
+        # synced_at is a local run timestamp and should not churn source-note frontmatter.
         assert "notion_synced_at" not in source_text
+
+    def test_reingest_unchanged_notion_markdown_preserves_matching_source_note(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        raw_file = tmp_path / "raw" / "notion" / "product-notes.md"
+        raw_file.parent.mkdir(parents=True, exist_ok=True)
+        raw_file.write_text(
+            "<!-- source: notion -->\n"
+            "<!-- notion_page_id: 1429989f-e8ac-4eff-bc8f-57f56486db54 -->\n"
+            "<!-- notion_page_url: https://www.notion.so/product-notes -->\n"
+            "<!-- notion_last_edited_time: 2026-04-12T12:00:00Z -->\n"
+            "<!-- notion_synced_at: 2026-04-12T12:05:00Z -->\n\n"
+            "# Product Notes\n\nOriginal roadmap decisions.\n"
+        )
+
+        runner = CliRunner()
+        first = runner.invoke(main, ["ingest", "raw/notion/product-notes.md", "--path", str(tmp_path)])
+        assert first.exit_code == 0
+
+        source_path = tmp_path / "wiki" / "sources" / "Product Notes.md"
+        source_path.write_text(source_path.read_text().replace("Original roadmap decisions.", "User edited source note."))
+        second = runner.invoke(main, ["ingest", "raw/notion/product-notes.md", "--path", str(tmp_path)])
+
+        assert second.exit_code == 0
+        assert "source already enriched" in second.output.lower()
+        source_text = source_path.read_text()
+        assert "User edited source note." in source_text
+        assert "Original roadmap decisions." not in source_text
+
+    def test_reingest_legacy_notion_note_stamps_last_edited_without_rewriting_body(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        raw_file = tmp_path / "raw" / "notion" / "product-notes.md"
+        raw_file.parent.mkdir(parents=True, exist_ok=True)
+        raw_file.write_text(
+            "<!-- source: notion -->\n"
+            "<!-- notion_page_id: 1429989f-e8ac-4eff-bc8f-57f56486db54 -->\n"
+            "<!-- notion_page_url: https://www.notion.so/product-notes -->\n"
+            "<!-- notion_last_edited_time: 2026-04-12T12:00:00Z -->\n\n"
+            "# Product Notes\n\nUpdated upstream content.\n"
+        )
+        source_path = tmp_path / "wiki" / "sources" / "Product Notes.md"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(
+            "---\n"
+            "title: Product Notes\n"
+            "type: source\n"
+            "status: seed\n"
+            "summary: Legacy edited note.\n"
+            "sources:\n"
+            "- raw/notion/product-notes.md\n"
+            "notion_page_id: 1429989f-e8ac-4eff-bc8f-57f56486db54\n"
+            "---\n\n"
+            "# Product Notes\n\n"
+            "User edited legacy source note.\n"
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["ingest", "raw/notion/product-notes.md", "--path", str(tmp_path)])
+
+        assert result.exit_code == 0
+        source_text = source_path.read_text()
+        assert "source already enriched" in result.output.lower()
+        assert "User edited legacy source note." in source_text
+        assert "Updated upstream content." not in source_text
+        assert "notion_last_edited_time: '2026-04-12T12:00:00Z'" in source_text
 
     def test_reingest_notion_markdown_refreshes_matching_source_note(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")
@@ -340,6 +402,19 @@ class TestIngestCommand:
         source_text = (tmp_path / "wiki" / "sources" / "Product Notes.md").read_text()
         assert "Updated roadmap decisions." in source_text
         assert "Original roadmap decisions." not in source_text
+
+    def test_ingest_thin_markdown_source_defaults_to_seed(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        raw_file = tmp_path / "raw" / "stub.md"
+        raw_file.write_text("# Stub\n\nA short note.")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["ingest", "stub.md", "--path", str(tmp_path)])
+
+        assert result.exit_code == 0
+        source_text = (tmp_path / "wiki" / "sources" / "Stub.md").read_text()
+        assert "status: seed" in source_text
+        assert "source_quality: thin" in source_text
 
     def test_reingest_notion_markdown_preserves_user_claimed_note(self, tmp_path: Path) -> None:
         init_workspace(tmp_path, "Test")

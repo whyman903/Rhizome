@@ -8,7 +8,7 @@ import yaml
 
 from compile.config import Config, save_config
 from compile.dates import format_frontmatter_datetime, now_frontmatter, now_machine
-from compile.markdown import parse_markdown_text
+from compile.markdown import strip_code_regions, parse_markdown_text
 from compile.page_types import ARTICLE_PAGE_TYPES, MAP_PAGE_TYPES, OUTPUT_PAGE_TYPES, WATCH_PAGE_TYPES
 
 COMPILE_CSS = """\
@@ -40,7 +40,15 @@ def init_workspace(root: Path, topic: str, description: str = "") -> Config:
     save_config(config)
     _save_state(config, {"processed": {}, "created_at": now_machine()})
 
-    empty_pages: dict[str, list[dict[str, str]]] = {"articles": [], "sources": [], "maps": [], "outputs": [], "other": []}
+    empty_pages: dict[str, list[dict[str, str]]] = {
+        "articles": [],
+        "sources": [],
+        "maps": [],
+        "outputs": [],
+        "watches": [],
+        "archived": [],
+        "other": [],
+    }
     write_index(config, empty_pages)
     write_overview(config, empty_pages)
     _write_initial_log(config)
@@ -167,7 +175,7 @@ def list_wiki_canvas_files(config: Config) -> list[str]:
 
 def collect_pages_by_type(config: Config) -> dict[str, list[dict[str, str]]]:
     buckets: dict[str, list[dict[str, str]]] = {
-        "articles": [], "sources": [], "maps": [], "outputs": [], "watches": [], "other": [],
+        "articles": [], "sources": [], "maps": [], "outputs": [], "watches": [], "archived": [], "other": [],
     }
     for page_path in list_wiki_pages(config):
         if page_path in ("index.md", "overview.md", "log.md"):
@@ -176,14 +184,14 @@ def collect_pages_by_type(config: Config) -> dict[str, list[dict[str, str]]]:
         if not content:
             continue
         fm, body, _ = parse_markdown_text(content)
-        page_type = _bucket_for_page(str(fm.get("type") or ""), page_path)
+        page_type = "archived" if _frontmatter_truthy(fm.get("archived")) else _bucket_for_page(str(fm.get("type") or ""), page_path)
         title = str(fm.get("title") or "").strip() or Path(page_path).stem.replace("-", " ").title()
-        summary = str(fm.get("summary") or "").strip()
+        summary = _clean_nav_summary(str(fm.get("summary") or "").strip())
         if not summary:
-            for line in body.splitlines():
+            for line in strip_code_regions(body).splitlines():
                 s = line.strip()
                 if s and not s.startswith(("#", "<!--")):
-                    summary = re.sub(r"^[-*]\s+", "", s)[:120]
+                    summary = _clean_nav_summary(re.sub(r"^[-*]\s+", "", s)[:120])
                     break
         buckets[page_type].append({"path": page_path, "title": title, "summary": summary})
     for entries in buckets.values():
@@ -198,8 +206,10 @@ def write_index(config: Config, pages_by_type: dict[str, list[dict[str, str]]]) 
         ("Articles", "articles"), ("Sources", "sources"),
         ("Maps", "maps"), ("Outputs", "outputs"),
         ("Watches", "watches"), ("Other", "other"),
+        ("Archived", "archived"),
     ]
-    has_content = any(pages_by_type.get(key) for _, key in sections)
+    active_sections = [section for section in sections if section[1] != "archived"]
+    has_content = any(pages_by_type.get(key) for _, key in active_sections)
     index_fm = {"title": "Index", "type": "index", "created": created, "updated": now}
     if not has_content:
         index_fm["bootstrap"] = True
@@ -220,7 +230,7 @@ def write_index(config: Config, pages_by_type: dict[str, list[dict[str, str]]]) 
 def write_overview(config: Config, pages_by_type: dict[str, list[dict[str, str]]]) -> None:
     now = now_frontmatter()
     created = _preserved_created(config.wiki_dir / "overview.md", now)
-    counts = {k: len(v) for k, v in pages_by_type.items()}
+    counts = {k: len(v) for k, v in pages_by_type.items() if k != "archived"}
     total = sum(counts.values())
     desc = config.description or "A maintained wiki workspace."
 
@@ -324,6 +334,23 @@ def _bucket_for_page(page_type: str, page_path: str) -> str:
     return "other"
 
 
+def _frontmatter_truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"true", "yes", "1"}
+
+
+def _clean_nav_summary(summary: str) -> str:
+    cleaned = summary.strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^>\s*\[![^\]]+\][-+]?\s*", "", cleaned).strip()
+    cleaned = re.sub(r"^>\s*", "", cleaned).strip()
+    if re.search(r"\b[A-Za-z0-9][^\n]*\s{2,}[A-Za-z0-9]", cleaned):
+        return ""
+    return cleaned[:160]
+
+
 def _write_initial_log(config: Config) -> None:
     now = now_frontmatter()
     (config.wiki_dir / "log.md").write_text(
@@ -376,8 +403,11 @@ Prefer `article` / `map` for new generic workspaces unless this topic truly bene
   - `sources`
   - `source_ids`
   - `citations`
+  - `source_quality` (`substantive`, `thin`, or `metadata_only` on source notes)
+  - `archived` (`true` for stale, superseded, or time-bounded pages that should remain searchable but leave active navigation)
 - Use `[[Page Title]]` wikilinks only for pages that already exist, unless you are creating the target page in the same pass.
 - Source-backed pages should preserve provenance explicitly.
+- Thin imports, task lists, empty stubs, navigation shells, and metadata-only assets should stay short and `seed`; do not pad them into article-like prose just to satisfy a template.
 
 ## Naming And Linking
 

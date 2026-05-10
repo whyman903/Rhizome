@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from compile.obsidian import ObsidianConnector
 from compile.text import ExtractedSource, normalize_text
@@ -16,6 +17,8 @@ class IngestArtifact:
     key_sections: list[str]
     raw_relative: str
     metadata_only: bool
+    source_quality: str
+    default_status: str
     extraction_method: str | None
     needs_document_review: bool
     full_text: str = ""
@@ -30,6 +33,7 @@ def build_ingest_artifact(
 ) -> IngestArtifact:
     effective_title = title or extracted.title
     synopsis = _build_synopsis(extracted)
+    source_quality = assess_source_quality(extracted)
     full_text = ""
     if not extracted.metadata_only:
         candidate = extracted.full_text or extracted.normalized_text
@@ -42,6 +46,12 @@ def build_ingest_artifact(
         key_sections=list(extracted.headings[:6]) if not extracted.metadata_only else [],
         raw_relative=raw_relative,
         metadata_only=extracted.metadata_only,
+        source_quality=source_quality,
+        default_status=(
+            "stable"
+            if source_quality == "substantive" and not extracted.requires_document_review
+            else "seed"
+        ),
         extraction_method=extracted.extraction_method,
         needs_document_review=extracted.requires_document_review,
         full_text=full_text,
@@ -136,6 +146,30 @@ def _frontmatter_summary(synopsis: str) -> str:
     return _truncate_sentence(normalize_text(synopsis), 220) or DEFAULT_SOURCE_SYNOPSIS
 
 
+def assess_source_quality(extracted: ExtractedSource) -> str:
+    """Classify source-note inputs without using domain-specific categories."""
+    if extracted.metadata_only:
+        return "metadata_only"
+
+    text = extracted.normalized_text.strip()
+    words = re.findall(r"\b[\w'-]+\b", text)
+    if len(words) < 80:
+        return "thin"
+
+    substantive_paragraphs = [
+        paragraph
+        for paragraph in extracted.paragraphs
+        if _is_substantive_paragraph(paragraph)
+    ]
+    if len(words) < 150 and len(substantive_paragraphs) < 2:
+        return "thin"
+
+    if _looks_like_scaffold_or_stub(extracted.full_text or extracted.normalized_text):
+        return "thin"
+
+    return "substantive"
+
+
 def _is_substantive_paragraph(paragraph: str) -> bool:
     stripped = paragraph.strip()
     if len(stripped) < 40:
@@ -143,6 +177,31 @@ def _is_substantive_paragraph(paragraph: str) -> bool:
     if stripped.lower().startswith(("source file:", "fetched:", "source_url:")):
         return False
     return True
+
+
+def _looks_like_scaffold_or_stub(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return True
+
+    prose_lines = [
+        line for line in lines
+        if not (
+            line.startswith(("#", "<!--"))
+            or re.match(r"^[-*+]\s+(?:\[[ xX]\]\s*)?", line)
+            or re.match(r"^\d+[.)]\s+", line)
+        )
+    ]
+    if len(lines) >= 4 and len(prose_lines) / len(lines) <= 0.4:
+        return True
+
+    cleaned = normalize_text(text).lower()
+    parent_only = re.fullmatch(r"(parent|source|title)\s*:\s*[^.]{1,120}", cleaned)
+    if parent_only:
+        return True
+    if cleaned in {"todo", "notes", "draft", "untitled", "empty"}:
+        return True
+    return False
 
 
 def _truncate_sentence(text: str, limit: int) -> str:

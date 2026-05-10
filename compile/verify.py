@@ -71,14 +71,19 @@ def audit_vault_content(root: Path) -> list[dict[str, Any]]:
     connector = ObsidianConnector(root.resolve())
     pages = connector.scan()
     issues: list[dict[str, Any]] = []
-    source_pages = [page for page in pages if page.page_type == "source"]
-    unanchored_source_pages = connector.source_pages_without_topic_anchors()
+    active_pages = [page for page in pages if not _frontmatter_truthy(page.frontmatter.get("archived"))]
+    source_pages = [page for page in active_pages if page.page_type == "source"]
+    unanchored_source_pages = [
+        page
+        for page in connector.source_pages_without_topic_anchors()
+        if not _frontmatter_truthy(page.frontmatter.get("archived"))
+    ]
     unanchored_source_paths = {page.relative_path for page in unanchored_source_pages}
 
     def supporting_count(page: Any) -> int:
         return len(connector.supporting_source_titles(page))
 
-    knowledge_pages = [page for page in pages if page.page_type in ARTICLE_PAGE_TYPES]
+    knowledge_pages = [page for page in active_pages if page.page_type in ARTICLE_PAGE_TYPES]
     single_source_pages = [
         page for page in knowledge_pages
         if supporting_count(page) <= 1
@@ -109,7 +114,9 @@ def audit_vault_content(root: Path) -> list[dict[str, Any]]:
             }
         )
 
-    for page in pages:
+    issues.extend(_duplicate_source_provenance_issues(source_pages))
+
+    for page in active_pages:
         issues.extend(
             _audit_page(
                 page,
@@ -188,6 +195,18 @@ def _audit_page(
             }
         )
 
+    if page.page_type == "source" and status == "stable" and _source_page_looks_thin(page):
+        issues.append(
+            {
+                "type": "stable_thin_source",
+                "severity": "medium",
+                "title": f"{page.title}: thin source note is marked stable.",
+                "suggestion": (
+                    "Demote the source note to seed or replace the generated scaffold with a real source summary."
+                ),
+            }
+        )
+
     if page.page_type == "source" and page.relative_path in unanchored_source_paths:
         issues.append(
             {
@@ -202,6 +221,61 @@ def _audit_page(
         )
 
     return issues
+
+
+def _duplicate_source_provenance_issues(source_pages: list[Any]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    groups: dict[tuple[str, str], list[Any]] = {}
+    for page in source_pages:
+        for raw_path in _frontmatter_list(page.frontmatter.get("sources")):
+            groups.setdefault(("raw source", raw_path), []).append(page)
+        notion_page_id = str(page.frontmatter.get("notion_page_id") or "").strip()
+        if notion_page_id:
+            groups.setdefault(("Notion page", notion_page_id), []).append(page)
+
+    for (kind, value), pages in sorted(groups.items(), key=lambda item: (item[0][0], item[0][1])):
+        if len(pages) < 2:
+            continue
+        page_list = ", ".join(page.relative_path for page in pages[:4])
+        issues.append(
+            {
+                "type": "duplicate_source_provenance",
+                "severity": "medium",
+                "title": f"{len(pages)} source notes claim the same {kind}: {value}.",
+                "suggestion": f"Merge or redirect the duplicates so one source artifact has one source note. Pages: {page_list}",
+            }
+        )
+    return issues
+
+
+def _frontmatter_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _frontmatter_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"true", "yes", "1"}
+
+
+def _source_page_looks_thin(page: Any) -> bool:
+    if "This is a registration shell." in page.body:
+        return True
+    if "Minimal source content; no substantive summary available." in page.body:
+        return True
+
+    authored = strip_code_regions(page.body).split("## Provenance", 1)[0]
+    authored = re.sub(r"^#+\s+.*$", "", authored, flags=re.MULTILINE)
+    words = re.findall(r"\b[\w'-]+\b", authored)
+    if len(words) < 80:
+        return True
+
+    paragraphs = count_content_paragraphs(authored)
+    return len(words) < 150 and paragraphs < 2
 
 
 def _has_empty_section(body: str) -> bool:

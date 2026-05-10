@@ -106,7 +106,16 @@ def build_health_report(
     resolved_root = root.resolve()
     connector = ObsidianConnector(root.resolve())
     vault = connector.inspect()
-    unanchored_source_notes = connector.source_pages_without_topic_anchors()
+    active_pages = [
+        page
+        for page in vault.pages
+        if not _frontmatter_truthy(page.frontmatter.get("archived"))
+    ]
+    unanchored_source_notes = [
+        page
+        for page in connector.source_pages_without_topic_anchors()
+        if not _frontmatter_truthy(page.frontmatter.get("archived"))
+    ]
     readiness_issues, graph_issues = _split_structural_issues(vault.issues)
     if content_issues is None:
         content_issues = audit_vault_content(resolved_root)
@@ -137,8 +146,8 @@ def build_health_report(
         content_counts=content_counts,
     )
 
-    source_count = sum(1 for page in vault.pages if page.page_type == "source")
-    knowledge_page_count = sum(1 for page in vault.pages if page.page_type in ARTICLE_PAGE_TYPES)
+    source_count = sum(1 for page in active_pages if page.page_type == "source")
+    knowledge_page_count = sum(1 for page in active_pages if page.page_type in ARTICLE_PAGE_TYPES)
 
     issues = [*readiness_issues, *graph_issues]
     issues.extend(
@@ -189,12 +198,13 @@ def build_health_report(
             "source_notes_without_topic_anchors": len(unanchored_source_notes),
             "needs_document_review": sum(
                 1
-                for page in vault.pages
+                for page in active_pages
                 if page.page_type == "source"
                 and str(page.frontmatter.get("review_status") or "").strip() == "needs_document_review"
             ),
             "knowledge_page_count": knowledge_page_count,
             "source_to_knowledge_page_ratio": round(source_count / max(knowledge_page_count, 1), 1),
+            "archived_pages": len(vault.pages) - len(active_pages),
         },
         "issues": issues,
     }
@@ -205,3 +215,9 @@ def write_health_snapshot(root: Path, report: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, sort_keys=False))
     return path
+
+
+def _frontmatter_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"true", "yes", "1"}

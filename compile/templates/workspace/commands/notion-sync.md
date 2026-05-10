@@ -47,7 +47,7 @@ Workflow:
 compile ingest raw/notion/<page_id>.md
 ```
 
-8. Let `compile ingest` handle source-note creation and refresh. If a user has removed `notion_page_id` from the source note frontmatter, treat that note as user-claimed and leave it alone.
+8. Let `compile ingest` handle source-note creation and refresh. It stores `notion_page_id`, `notion_url`, and `notion_last_edited_time` in source-note frontmatter so unchanged imports are preserved instead of rewritten. If a user has removed `notion_page_id` from the source note frontmatter, treat that note as user-claimed and leave it alone.
 9. At the end, after all serial ingest calls finish:
    - Run `compile obsidian refresh`
    - Run `compile health`

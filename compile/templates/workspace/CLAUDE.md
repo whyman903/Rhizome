@@ -167,7 +167,8 @@ Periodically, or when asked:
 1. Run `compile health --json-output`.
 2. Run `compile obsidian inspect`.
 3. Fix broken links, stale navigation, weak summaries, orphan pages, duplicate pages, and premature `stable` labels.
-4. Run `compile obsidian refresh` after edits.
+4. For stale, superseded, or time-bounded material that should remain searchable but stop driving active navigation, set `archived: true` rather than deleting it by default.
+5. Run `compile obsidian refresh` after edits.
 
 ## Frontmatter Contract
 
@@ -181,7 +182,7 @@ created: 2026-04-07 00:00
 updated: 2026-04-07 00:00
 ```
 
-Optional when relevant: `summary`, `tags`, `aliases`, `sources`, `source_ids`.
+Optional when relevant: `summary`, `tags`, `aliases`, `sources`, `source_ids`, `source_quality`, `archived`.
 
 Only write a `summary` when it adds something beyond the first line of the body.
 
@@ -208,7 +209,7 @@ Status is prompt-judged by you during ingest and lint, not machine-enforced. The
 - `emerging`: 2+ sources with partial synthesis. The page names its sources and attempts cross-source claims.
 - `stable`: 3+ sources with genuine synthesis. The page names where sources agree, where they diverge, and what remains uncertain.
 
-Source note status is always `stable` unless the note is a registration shell, has `review_status: needs_document_review`, or is too thin to support meaningful claims (e.g., an empty Notion stub). Thin source notes should be `seed` and kept short rather than padded; do not insert `> [!note]` callouts to flag thinness — the brevity of the note is itself the signal.
+Source note status is `stable` only when the source note captures substantive claims from the artifact. Registration shells, metadata-only assets, sources with `review_status: needs_document_review`, and thin imports with no meaningful claims should be `seed` and kept short rather than padded. Do not insert `> [!note]` callouts to flag thinness — the brevity and `source_quality` frontmatter are the signal.
 
 Do not mark an article `stable` unless it meets the definition. When in doubt, use `seed`. When you update an article and it now meets a higher bar, upgrade it.
 

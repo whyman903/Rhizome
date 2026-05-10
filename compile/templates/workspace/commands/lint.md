@@ -13,6 +13,8 @@ Work through three phases. The structural audit is mechanical. The editorial aud
    - **Thin pages**: read them, then either use `Edit` to expand in place with real content or merge into a related article.
    - **Stale navigation**: run `compile obsidian refresh`.
    - **Malformed summaries**: read the page and use `Edit` to fix the `summary:` frontmatter line or the opening summary paragraph.
+   - **Duplicate source provenance**: if two source notes claim the same raw file or upstream page ID, merge the substantive content into one source note, redirect or archive the weaker duplicate, and keep one canonical provenance path.
+   - **Thin stable source notes**: demote them to `seed` or replace the scaffold with a real source summary. Do not pad empty material.
    - **Source notes without article/map anchors**: use `Edit` on an existing article or map to add a `[[wikilink]]` to the source, or create a lightweight map page if the broad topic clearly lacks a hub. If the problem is systemic — many unanchored sources sharing a theme — run `/synthesize` instead of wiring them one at a time.
 
 ### Phase 2 — Editorial audit
@@ -25,18 +27,19 @@ Per the workspace `CLAUDE.md`, status is prompt-judged, not machine-enforced. Th
    - 3+ sources with genuine synthesis naming agreements, disagreements, and uncertainty → `stable`
    Upgrade or downgrade as needed. Articles mislabeled `stable` are the most common failure mode; demote them without hesitation.
 6. **Coverage gap detection.** Identify themes that have 3+ unanchored source notes and no article or map. Either create a `seed` article or map, or add the gap to the report as a candidate for `/synthesize`.
-7. **Disagreement sweep.** For articles with 2+ sources, read the article and its sources. If sources materially disagree — on facts, norms, or framing — and the disagreement is not already surfaced, add a `> [!warning] Disagreement` callout naming both sources and the specific point of contention.
+7. **Disagreement sweep.** For articles with 2+ sources, read the article and its sources. If sources materially disagree — on facts, norms, or framing — and the disagreement is not already surfaced, name the disagreement directly in prose, citing both sources and the specific point of contention. Do not use a disagreement callout; the article should read as finished prose.
 8. **Dead-end source sweep.** Find source notes that are not connected to any article or map (no outbound wikilinks to one, no inbound backlinks from one). For each, either wire it into the appropriate article, create a `seed` article if the theme now has 3+ sources, or document in the report why it legitimately stands alone.
-9. **Article quality pass.** For each article, check:
+9. **Archive pass.** Mark stale, superseded, or time-bounded pages with `archived: true` when they should remain searchable but stop appearing in active counts and highlights. Prefer archive/redirect over deletion unless the user explicitly asks for deletion.
+10. **Article quality pass.** For each article, check:
    - Does it synthesize or just paraphrase one source? A paraphrase is a source note mislabeled.
    - Are there missing `[[wikilinks]]` where related pages exist?
    - Are there claims that newer sources have superseded?
 
 ### Phase 3 — Refresh and report
 
-10. Run `compile obsidian refresh` after all fixes.
-11. Run `compile health --json-output` again. Plain `compile health` shows the headline metrics (knowledge pages, source-to-knowledge-page ratio, unanchored sources), but the JSON output is what you need to verify structural issues are resolved and to pull the counts for the report.
-12. Report:
+11. Run `compile obsidian refresh` after all fixes.
+12. Run `compile health --json-output` again. Plain `compile health` shows the headline metrics (knowledge pages, source-to-knowledge-page ratio, unanchored sources), but the JSON output is what you need to verify structural issues are resolved and to pull the counts for the report.
+13. Report:
     - **Structural**: issues found, issues fixed.
     - **Editorial**: status changes made, disagreements surfaced, dead-end sources wired, coverage gaps identified.
     - **Wiki Quality Snapshot**: knowledge page count, source-to-knowledge-page ratio, percentage of source notes anchored (compute from `source_notes_without_topic_anchors` and the source count in the JSON), status distribution across articles (count by reading the pages — the JSON does not aggregate this), disagreements surfaced this pass.

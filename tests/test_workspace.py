@@ -292,6 +292,39 @@ class TestCollectPagesByType:
         entry = pages["articles"][0]
         assert entry["summary"] == "Frontmatter summary."
 
+    def test_archived_pages_are_bucketed_separately(self, tmp_path: Path) -> None:
+        config = init_workspace(tmp_path, "Test")
+        archived = tmp_path / "wiki" / "articles" / "old.md"
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        archived.write_text(
+            "---\n"
+            "title: Old Page\n"
+            "type: article\n"
+            "archived: true\n"
+            "---\n\n"
+            "# Old Page\n\nArchived body.\n"
+        )
+
+        pages = collect_pages_by_type(config)
+
+        assert not pages["articles"]
+        assert [entry["title"] for entry in pages["archived"]] == ["Old Page"]
+
+    def test_malformed_summaries_do_not_propagate_to_navigation(self, tmp_path: Path) -> None:
+        config = init_workspace(tmp_path, "Test")
+        _write_page(
+            tmp_path / "wiki" / "articles" / "a.md",
+            "Article A",
+            "article",
+            "Clean body summary for navigation.",
+            summary="Broken extraction  repeated text",
+        )
+
+        pages = collect_pages_by_type(config)
+        entry = pages["articles"][0]
+
+        assert entry["summary"] == "Clean body summary for navigation."
+
 
 class TestWriteIndex:
     def test_writes_index_with_entries(self, tmp_path: Path) -> None:
@@ -304,6 +337,28 @@ class TestWriteIndex:
         assert "[[Alpha]]" in index
         assert "Alpha summary." in index
         assert "bootstrap" not in index
+
+    def test_index_lists_archived_pages_only_in_archived_section(self, tmp_path: Path) -> None:
+        config = init_workspace(tmp_path, "Test")
+        archived = tmp_path / "wiki" / "articles" / "old.md"
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        archived.write_text(
+            "---\n"
+            "title: Old Page\n"
+            "type: article\n"
+            "archived: true\n"
+            "summary: Archived summary.\n"
+            "---\n\n"
+            "# Old Page\n\nArchived body.\n"
+        )
+        pages = collect_pages_by_type(config)
+        write_index(config, pages)
+
+        index = (tmp_path / "wiki" / "index.md").read_text()
+        articles_section = index.split("## Articles", 1)[1].split("## Sources", 1)[0]
+        archived_section = index.split("## Archived", 1)[1]
+        assert "[[Old Page]]" not in articles_section
+        assert "[[Old Page]]" in archived_section
 
     def test_empty_index_has_bootstrap_flag(self, tmp_path: Path) -> None:
         config = init_workspace(tmp_path, "Test")
@@ -347,6 +402,26 @@ class TestWriteOverview:
         assert "[[Alpha]]" in overview
         assert "Articles: 1" in overview
         assert "bootstrap" not in overview
+
+    def test_overview_excludes_archived_pages_from_active_counts(self, tmp_path: Path) -> None:
+        config = init_workspace(tmp_path, "Test")
+        archived = tmp_path / "wiki" / "articles" / "old.md"
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        archived.write_text(
+            "---\n"
+            "title: Old Page\n"
+            "type: article\n"
+            "archived: true\n"
+            "summary: Archived summary.\n"
+            "---\n\n"
+            "# Old Page\n\nArchived body.\n"
+        )
+        pages = collect_pages_by_type(config)
+        write_overview(config, pages)
+
+        overview = (tmp_path / "wiki" / "overview.md").read_text()
+        assert "[[Old Page]]" not in overview
+        assert "Articles: 1" not in overview
 
 
 class TestAppendLogEntry:

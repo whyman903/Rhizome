@@ -194,10 +194,19 @@ def _resolve_source_title(
 
 
 def _should_refresh_existing_source_page(page, *, extra_frontmatter: dict[str, str] | None = None) -> bool:
-    notion_page_id = str((extra_frontmatter or {}).get("notion_page_id") or "").strip()
+    extra_frontmatter = extra_frontmatter or {}
+    notion_page_id = str(extra_frontmatter.get("notion_page_id") or "").strip()
     if not notion_page_id:
         return False
-    return str(page.frontmatter.get("notion_page_id") or "").strip() == notion_page_id
+    if str(page.frontmatter.get("notion_page_id") or "").strip() != notion_page_id:
+        return False
+
+    incoming_last_edited = str(extra_frontmatter.get("notion_last_edited_time") or "").strip()
+    existing_last_edited = str(page.frontmatter.get("notion_last_edited_time") or "").strip()
+    if incoming_last_edited and existing_last_edited:
+        return incoming_last_edited != existing_last_edited
+
+    return False
 
 
 def _ingest_raw_source(
@@ -241,6 +250,11 @@ def _ingest_raw_source(
             extra_frontmatter=extra_frontmatter,
         )
     ):
+        existing_source_page = _stamp_missing_source_provenance(
+            connector,
+            existing_source_page,
+            extra_frontmatter=extra_frontmatter,
+        )
         if raw_path.suffix.lower() == ".pdf":
             _refresh_pdf_index_for_source_page(
                 config,
@@ -295,6 +309,10 @@ def _ingest_raw_source(
             if old_file.exists():
                 old_file.unlink()
     merged_frontmatter = _source_review_frontmatter(extracted) or {}
+    merged_frontmatter.update({
+        "source_quality": artifact.source_quality,
+        "status": artifact.default_status,
+    })
     if extra_frontmatter:
         merged_frontmatter.update(extra_frontmatter)
     page = connector.upsert_page(
@@ -366,6 +384,36 @@ def _ingest_raw_source(
         "metadata_only": artifact.metadata_only,
         "needs_document_review": artifact.needs_document_review,
     }
+
+
+def _stamp_missing_source_provenance(
+    connector: ObsidianConnector,
+    page,
+    *,
+    extra_frontmatter: dict[str, str] | None,
+):
+    extra_frontmatter = extra_frontmatter or {}
+    missing = {
+        key: value
+        for key, value in extra_frontmatter.items()
+        if key.startswith("notion_")
+        and value
+        and not str(page.frontmatter.get(key) or "").strip()
+    }
+    if not missing:
+        return page
+    return connector.upsert_page(
+        title=page.title,
+        body=page.body,
+        page_type=page.page_type,
+        tags=list(page.tags),
+        sources=_coerce_frontmatter_list(page.frontmatter.get("sources")),
+        aliases=list(page.aliases),
+        summary=str(page.frontmatter.get("summary") or "") or None,
+        relative_path=page.relative_path,
+        extra_frontmatter=missing,
+        ensure_title_heading=False,
+    )
 
 
 @click.group()
@@ -1991,16 +2039,13 @@ def _extract_source_provenance_frontmatter(raw_path: Path) -> dict[str, str] | N
     if comments.get("source") != "notion":
         return None
     frontmatter: dict[str, str] = {}
-    # Only persist the keys that something actually reads:
-    # - notion_page_id: used by `_should_refresh_existing_source_page` to recognize
-    #   a re-sync of the same Notion page.
-    # - notion_url: clickable backlink to the Notion source from Obsidian.
-    # The skip-if-unchanged logic reads `notion_last_edited_time` from the raw
-    # file's HTML comments, so duplicating it (or `notion_synced_at`) into
-    # frontmatter just clutters every Notion-sourced page.
+    # Persist stable provenance that the import path needs for idempotency and
+    # for a clickable backlink to the upstream page. `notion_synced_at` is a
+    # local run timestamp, so storing it in source pages would create churn.
     mapping = {
         "notion_page_id": "notion_page_id",
         "notion_page_url": "notion_url",
+        "notion_last_edited_time": "notion_last_edited_time",
     }
     for comment_key, frontmatter_key in mapping.items():
         value = comments.get(comment_key, "").strip()

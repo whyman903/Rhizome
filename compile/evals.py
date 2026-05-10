@@ -84,95 +84,87 @@ INVENTORY_QUERY_RE = re.compile(
 # absence-with-fallback, and formatting-rule probes (LaTeX-not-Unicode).
 STARTER_QUERIES: list[dict[str, Any]] = [
     {
-        "id": "tcp-udp",
-        "query": "what's the difference between TCP and UDP?",
+        "id": "wiki-first-short-lookup",
+        "query": "pick one concrete topic already in the wiki and explain it in three sentences",
     },
     {
-        "id": "codebleu-side",
-        "query": "what's the difference between CodeBLEU and SIDE? What does CodeBLEU change from normal BLEU?",
+        "id": "acronym-disambiguation",
+        "query": "what does the acronym or short term that appears most often in my wiki mean in context?",
     },
     {
-        "id": "four-moral-theories-table",
+        "id": "shared-dimensions-table",
         "query": (
-            "compare the four moral theories from my ethics course "
-            "(consequentialism, Kantian deontology, contractualism, "
-            "objective-list / hybrid well-being) on what makes an act right "
-            "and one representative thinker for each"
+            "find three related concepts or methods already covered in the wiki "
+            "and compare them in a table on shared dimensions"
         ),
     },
     {
-        "id": "inference-bottlenecks-table",
+        "id": "source-methods-table",
         "query": (
-            "compare vLLM, DFlash, and MinerU2.5: what serial bottleneck does "
-            "each one attack, and what is the architectural fix?"
+            "choose three source notes from the same cluster and compare what "
+            "problem each source addresses, what evidence it uses, and what limitation remains"
         ),
     },
     {
-        "id": "bullshitters-paper-canvas",
+        "id": "source-accounting-canvas",
         "query": (
-            "lay out how the LLM bullshitters paper argument hangs together: "
-            "Frankfurt, Nguyen, Anderson, Farkas and Shou, and 'epistemic "
-            "pollution' — show which sources support which moves and which "
-            "sources push against the framing"
+            "pick one synthesis article and lay out which source notes support "
+            "which major claims, including any source that pushes against the framing"
         ),
     },
     {
-        "id": "migration-typology-canvas",
+        "id": "taxonomy-canvas",
         "query": (
-            "Sanjek lays out seven migration processes — show me how they "
-            "relate as a typology, and which ones layer onto the contemporary "
-            "United States"
+            "if the wiki has a taxonomy or typology, show how its categories relate; "
+            "if not, say what you searched and use the closest available cluster"
         ),
     },
     {
-        "id": "dl4se-course-arc-mermaid",
+        "id": "sequence-arc-mermaid",
         "query": (
-            "walk me through the DL4SE lecture sequence from MSR (lecture 2) "
-            "through RAG (lecture 10): what builds on what?"
+            "find a sequence, workflow, or course-like set of notes in the wiki "
+            "and show what builds on what"
         ),
     },
     {
-        "id": "prevention-through-deterrence-mermaid",
+        "id": "causal-chain-mermaid",
         "query": (
-            "trace McGuire's causal argument that the US 'Prevention Through "
-            "Deterrence' policy turns the Sonoran Desert itself into an agent "
-            "of state violence — step through the chain"
+            "choose one causal or dependency claim already in the wiki and step "
+            "through the chain clearly"
         ),
     },
     {
-        "id": "frankfurt-teaching-deck",
+        "id": "teaching-deck",
         "query": (
-            "I'm giving a 10-minute talk explaining Frankfurt's notion of "
-            "bullshit and why it matters for thinking about LLMs — build me "
-            "the deck"
+            "I'm giving a 10-minute talk on one topic already covered in the wiki; "
+            "build me the deck using only the wiki as the source base"
         ),
     },
     {
-        "id": "luders-correlations-chart",
+        "id": "quantitative-chart",
         "query": (
-            "what correlations does the Lüders 2023 attitude-networks paper "
-            "report between partisan identity and attitude positions, and how "
-            "should I visualize them at a glance?"
+            "find a source note with quantitative values or comparisons and tell "
+            "me how to visualize them at a glance"
         ),
     },
     {
-        "id": "paged-attention-casual",
-        "query": "what's the deal with PagedAttention?",
+        "id": "casual-lookup",
+        "query": "what's the deal with the topic I added most recently?",
     },
     {
-        "id": "chamber-callback",
-        "query": "remind me what an epistemic chamber is, in a couple sentences",
+        "id": "brief-callback",
+        "query": "remind me what the latest source note was about, in a couple sentences",
     },
     {
-        "id": "frankfurt-bullshit-quote",
+        "id": "quote-retrieval",
         "query": (
-            "what's Frankfurt's actual definition of bullshit, in his own "
-            "words? I want a real quote, not a paraphrase."
+            "find one important quoted or quote-sensitive claim in the wiki and "
+            "give me the exact quote with its source"
         ),
     },
     {
-        "id": "future-like-ours-yesno",
-        "query": "do I have anything on Marquis's 'future like ours' argument?",
+        "id": "existence-yesno",
+        "query": "do I have anything on a topic called 'placeholder topic that probably is not in the wiki'?",
     },
     {
         "id": "recent-ingests-grouped",
@@ -182,16 +174,15 @@ STARTER_QUERIES: list[dict[str, Any]] = [
         ),
     },
     {
-        "id": "contractualism-source-count",
+        "id": "source-count-inventory",
         "query": (
-            "how many source notes do I have that engage contractualism — "
-            "Hobbes, Locke, Rachels, Carruthers, Scanlon, anything in that "
-            "family? give me the count and the list."
+            "how many source notes are in the largest cluster in this wiki? "
+            "give me the count and the list."
         ),
     },
     {
-        "id": "quantum-computing-false-premise",
-        "query": "summarize my notes on quantum computing",
+        "id": "false-premise-absence",
+        "query": "summarize my notes on a topic that does not appear in the wiki",
     },
     {
         "id": "biggest-cluster-disagreement",
@@ -202,24 +193,24 @@ STARTER_QUERIES: list[dict[str, Any]] = [
         ),
     },
     {
-        "id": "bullshitters-thesis-draft",
+        "id": "wiki-thesis-draft",
         "query": (
-            "draft a one-sentence thesis statement for my LLM bullshitters "
-            "paper, using only what's already in the wiki"
+            "draft a one-sentence thesis statement for the most developed article "
+            "in the wiki, using only what's already there"
         ),
     },
     {
-        "id": "memory-trick-exam",
+        "id": "time-bound-prep-plan",
         "query": (
-            "give me a memory trick for keeping the four moral theories "
-            "straight before my ethics exam tomorrow"
+            "I have to review this wiki tomorrow morning. Build me a high-leverage "
+            "prep plan from the existing pages: what to review, in what order, and why."
         ),
     },
     {
         "id": "likely-duplicate-notes",
         "query": (
-            "are there likely-duplicate notes in my philosophy or truth and "
-            "post-truth materials? name the pairs and say which one to keep."
+            "are there likely-duplicate notes in the wiki? name the pairs and "
+            "say which one to keep."
         ),
     },
     {
@@ -231,34 +222,31 @@ STARTER_QUERIES: list[dict[str, Any]] = [
         ),
     },
     {
-        "id": "hobbes-locke-state-of-nature",
+        "id": "compare-two-positions",
         "query": (
-            "compare Hobbes and Locke on the state of nature, and explain "
-            "how their different premises drive opposite conclusions about "
-            "the limits of sovereign power"
+            "find two positions, approaches, or authors that the wiki treats as "
+            "contrasting, and explain how their premises drive different conclusions"
         ),
     },
     {
-        "id": "system-design-prep-plan",
+        "id": "project-prep-plan",
         "query": (
-            "I have a system design interview tomorrow morning. Using only "
-            "what's already in my wiki, build me a high-leverage prep plan "
-            "— what to review, in what order, and why."
+            "Using only what's already in the wiki, build a focused prep plan "
+            "for whichever project, course, or cluster has the most source notes."
         ),
     },
     {
-        "id": "grpo-absence",
+        "id": "out-of-wiki-fallback",
         "query": (
-            "do I have anything in the wiki on GRPO (Group Relative Policy "
-            "Optimization)? If not, say what you searched for and then "
-            "explain GRPO from general knowledge."
+            "do I have anything in the wiki on an unrelated outside topic? "
+            "If not, say what you searched and then answer from general knowledge."
         ),
     },
     {
-        "id": "attention-formula-latex",
+        "id": "formula-latex",
         "query": (
-            "explain how scaled dot-product attention is computed, including "
-            "the formula. Use proper LaTeX math, not Unicode."
+            "find one technical or mathematical formula in the wiki and explain "
+            "it using proper LaTeX math, not Unicode."
         ),
     },
 ]

@@ -221,6 +221,59 @@ class TestBuildHealthReport:
         assert report["content_health"]["status"] == "warn"
         assert any(issue["code"] == "topic_hub_coverage_gap" for issue in report["issues"])
 
+    def test_stable_thin_source_surfaces_in_health(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        _write_page(
+            tmp_path / "wiki" / "sources" / "stub.md",
+            "Stub",
+            "source",
+            "A short source note.",
+            status="stable",
+            summary='"Short source."',
+        )
+        _refresh_nav(tmp_path)
+
+        report = build_health_report(tmp_path)
+
+        assert any(issue["code"] == "stable_thin_source" for issue in report["issues"])
+
+    def test_duplicate_source_provenance_surfaces_in_health(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        for name in ("one", "two"):
+            _write_page(
+                tmp_path / "wiki" / "sources" / f"{name}.md",
+                name.title(),
+                "source",
+                "A source summary with enough words to avoid being only a bare title.\n\n"
+                "Another paragraph gives the note some body.",
+                status="seed",
+                summary='"Source note."',
+                notion_page_id="same-page-id",
+            )
+        _refresh_nav(tmp_path)
+
+        report = build_health_report(tmp_path)
+
+        assert any(issue["code"] == "duplicate_source_provenance" for issue in report["issues"])
+
+    def test_archived_pages_are_excluded_from_editorial_metrics(self, tmp_path: Path) -> None:
+        init_workspace(tmp_path, "Test")
+        _write_page(
+            tmp_path / "wiki" / "articles" / "old.md",
+            "Old",
+            "article",
+            "Archived article body.",
+            status="stable",
+            summary='"Archived."',
+            archived="true",
+        )
+        _refresh_nav(tmp_path)
+
+        report = build_health_report(tmp_path)
+
+        assert report["metrics"]["knowledge_page_count"] == 0
+        assert report["metrics"]["archived_pages"] == 1
+
 
 class TestWriteHealthSnapshot:
     def test_writes_file(self, tmp_path: Path) -> None:
