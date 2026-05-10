@@ -22,7 +22,7 @@ struct QueryDetailView: View {
     private let minSidebarWidth: CGFloat = 140
     private let defaultSidebarWidth: CGFloat = 260
     private let maxSidebarWidth: CGFloat = 420
-    private let topBarHeight: CGFloat = 42
+    private let topBarHeight: CGFloat = 76
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -54,13 +54,18 @@ struct QueryDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
         }
         .ignoresSafeArea(.all, edges: .top)
-        .background(WindowChromeConfigurator())
+        .background(WindowChromeConfigurator(onCommandClose: closeActiveQueryTab))
         .background(EditorialPalette.background)
         .id("\(model.theme.rawValue).\(model.font.rawValue)")
         .preferredColorScheme(model.theme.prefersDarkMode ? .dark : .light)
         .onChange(of: model.watchesPaneRequestToken) { _, _ in
             activePane = .watches
             Task { await watchesViewModel.reload() }
+        }
+        .onChange(of: model.newQueryTabRequestToken) { _, _ in
+            activePane = .conversation
+            followUpText = ""
+            isInputFocused = true
         }
         .alert("Install Advanced URI?", isPresented: $model.showGraphPluginInstallPrompt) {
             Button("Install") {
@@ -79,6 +84,22 @@ struct QueryDetailView: View {
     // MARK: - Top bar
 
     private var topBar: some View {
+        VStack(spacing: 0) {
+            chromeRow
+                .frame(height: 42)
+
+            tabStrip
+                .frame(height: 34)
+        }
+        .background(EditorialPalette.backgroundTop.opacity(0.96))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(EditorialPalette.border)
+                .frame(height: 1)
+        }
+    }
+
+    private var chromeRow: some View {
         HStack(spacing: 4) {
             Color.clear.frame(width: 70, height: 1)
 
@@ -117,12 +138,9 @@ struct QueryDetailView: View {
                 ChromeIconButton(
                     systemName: "plus",
                     isActive: false,
-                    help: "New query"
+                    help: "New tab"
                 ) {
-                    activePane = .conversation
-                    model.startNewQuery()
-                    followUpText = ""
-                    isInputFocused = true
+                    openNewQueryTab()
                 }
 
                 ChromeIconButton(
@@ -136,6 +154,59 @@ struct QueryDetailView: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
+    }
+
+    private var tabStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(model.queryTabs) { session in
+                    ConversationTab(
+                        session: session,
+                        isActive: session.id == model.querySession.id,
+                        canClose: model.queryTabs.count > 1 || model.hasActiveQuerySession,
+                        onSelect: {
+                            activePane = .conversation
+                            model.selectQueryTab(session)
+                            followUpText = ""
+                        },
+                        onClose: {
+                            let wasActive = session.id == model.querySession.id
+                            model.closeQueryTab(id: session.id)
+                            if wasActive {
+                                followUpText = ""
+                                activePane = .conversation
+                            }
+                        }
+                    )
+                }
+
+                Button(action: openNewQueryTab) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(EditorialPalette.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("New tab (⌘T)")
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 7)
+        }
+        .overlayScrollers()
+    }
+
+    private func openNewQueryTab() {
+        activePane = .conversation
+        model.startNewQuery()
+        followUpText = ""
+        isInputFocused = true
+    }
+
+    private func closeActiveQueryTab() {
+        activePane = .conversation
+        model.closeActiveQueryTab()
+        followUpText = ""
     }
 
     // MARK: - Conversation
@@ -911,6 +982,99 @@ private struct QueryGraphLoadingIndicator: View {
     }
 }
 
+private struct ConversationTab: View {
+    @Bindable var session: QuerySession
+    let isActive: Bool
+    let canClose: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    @State private var isHovering = false
+
+    private var title: String {
+        let text = session.firstQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "New Query" : text
+    }
+
+    private var statusColor: Color {
+        switch session.status {
+        case .running:
+            return EditorialPalette.accent
+        case .failed:
+            return EditorialPalette.warning
+        case .cancelled:
+            return EditorialPalette.textTertiary
+        case .completed:
+            return EditorialPalette.textSecondary
+        case .idle:
+            return EditorialPalette.textTertiary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Button(action: onSelect) {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+
+                    Text(title)
+                        .font(.system(size: 11.5, weight: isActive ? .semibold : .medium, design: activeFont.design))
+                        .foregroundStyle(isActive ? EditorialPalette.textPrimary : EditorialPalette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if canClose && (isHovering || isActive) {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(EditorialPalette.textTertiary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close tab (⌘W)")
+            }
+        }
+        .frame(width: 168, height: 24)
+        .padding(.horizontal, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(borderColor, lineWidth: 0.75)
+        )
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .contextMenu {
+            Button("Close Tab", action: onClose)
+        }
+    }
+
+    private var backgroundColor: Color {
+        if isActive { return EditorialPalette.surface }
+        if isHovering { return EditorialPalette.surfaceHover.opacity(0.7) }
+        return EditorialPalette.background.opacity(0.72)
+    }
+
+    private var borderColor: Color {
+        if isActive { return EditorialPalette.borderHover }
+        if isHovering { return EditorialPalette.border }
+        return EditorialPalette.border.opacity(0.55)
+    }
+}
+
 private struct ChromeIconButton: View {
     let systemName: String
     let isActive: Bool
@@ -1047,22 +1211,84 @@ private struct TitleChip: View {
 }
 
 private struct WindowChromeConfigurator: NSViewRepresentable {
+    let onCommandClose: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCommandClose: onCommandClose)
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        DispatchQueue.main.async { configure(view.window) }
+        DispatchQueue.main.async { configure(view.window, coordinator: context.coordinator) }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { configure(nsView.window) }
+        context.coordinator.onCommandClose = onCommandClose
+        DispatchQueue.main.async { configure(nsView.window, coordinator: context.coordinator) }
     }
 
-    private func configure(_ window: NSWindow?) {
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        if nsView.window?.delegate === coordinator {
+            nsView.window?.delegate = coordinator.previousDelegate
+        }
+    }
+
+    private func configure(_ window: NSWindow?, coordinator: Coordinator) {
         guard let window else { return }
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+        coordinator.attach(to: window)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSWindowDelegate {
+        var onCommandClose: () -> Void
+        weak var previousDelegate: NSWindowDelegate?
+        private weak var window: NSWindow?
+        private var lastCommandWEventTimestamp: TimeInterval?
+
+        init(onCommandClose: @escaping () -> Void) {
+            self.onCommandClose = onCommandClose
+        }
+
+        func attach(to window: NSWindow) {
+            guard self.window !== window || window.delegate !== self else { return }
+            if window.delegate !== self {
+                previousDelegate = window.delegate
+            }
+            self.window = window
+            window.delegate = self
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            let event = NSApplication.shared.currentEvent
+            guard isCommandWCloseEvent(event) else {
+                return previousDelegate?.windowShouldClose?(sender) ?? true
+            }
+
+            if event?.isARepeat == true || event?.timestamp == lastCommandWEventTimestamp {
+                return false
+            }
+            lastCommandWEventTimestamp = event?.timestamp
+            onCommandClose()
+            return false
+        }
+
+        private func isCommandWCloseEvent(_ event: NSEvent?) -> Bool {
+            guard event?.type == .keyDown,
+                  event?.window === window,
+                  event?.charactersIgnoringModifiers?.lowercased() == "w" else {
+                return false
+            }
+            let flags = event?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+            return flags.contains(.command)
+                && !flags.contains(.option)
+                && !flags.contains(.control)
+                && !flags.contains(.shift)
+        }
     }
 }
 

@@ -45,8 +45,11 @@ public final class AppModel {
     public private(set) var workspace: WorkspaceInfo?
     public private(set) var recentWorkspacePaths: [String] = []
     public let feedStore: FeedStore
-    public private(set) var querySession = QuerySession()
-    public private(set) var backgroundQuerySessions: [QuerySession] = []
+    public private(set) var querySession: QuerySession
+    public private(set) var queryTabs: [QuerySession]
+    public var backgroundQuerySessions: [QuerySession] {
+        queryTabs.filter { $0.id != querySession.id }
+    }
     public private(set) var queryHistory: [QueryHistoryRecord] = []
     public private(set) var deletedQueryHistory: [QueryHistoryRecord] = []
     public var hasActiveQuerySession: Bool {
@@ -56,10 +59,12 @@ public final class AppModel {
         hasActiveQuerySession && !queryHistory.contains { $0.id == querySession.id }
     }
     public var sidebarPendingQuerySessions: [QuerySession] {
-        backgroundQuerySessions
+        backgroundQuerySessions.filter {
+            $0.status == .running && activeQueryTasks[$0.id] != nil
+        }
     }
     public var sidebarQueryHistory: [QueryHistoryRecord] {
-        let pendingIDs = Set(backgroundQuerySessions.map(\.id))
+        let pendingIDs = Set(sidebarPendingQuerySessions.map(\.id))
         return queryHistory.filter { !pendingIDs.contains($0.id) }
     }
     public var sidebarDeletedQueryHistory: [QueryHistoryRecord] {
@@ -72,6 +77,9 @@ public final class AppModel {
     /// Bumped whenever the menu-bar launcher asks the main window to show the
     /// Watches pane. The query window observes this counter and switches panes.
     public private(set) var watchesPaneRequestToken: Int = 0
+    /// Bumped whenever an app-level command asks the main window to create and
+    /// focus a fresh conversation tab.
+    public private(set) var newQueryTabRequestToken: Int = 0
     public private(set) var isInstallingGraphPlugin = false
     public var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: themeKey) }
@@ -130,6 +138,9 @@ public final class AppModel {
         isObsidianRunningHandler: @escaping @MainActor () -> Bool = ObsidianOpener.isObsidianRunning,
         installWatchTrigger: (@MainActor (URL) throws -> Void)? = nil
     ) {
+        let initialQuerySession = QuerySession()
+        self.querySession = initialQuerySession
+        self.queryTabs = [initialQuerySession]
         self.logger = logger
         let resolvedRunner = runner ?? CompileRunner(logger: logger)
         self.runner = resolvedRunner
@@ -217,14 +228,11 @@ public final class AppModel {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        parkActiveQuerySessionIfNeeded()
-        archiveSessionIfNeeded()
-        querySession = QuerySession()
-        querySession.start(question: trimmed)
+        let session = sessionForNewQuery()
+        session.start(question: trimmed)
         let feedItemID = feedStore.recordLocalQuery(trimmed)
 
         let workspaceURL = workspace.url
-        let session = querySession
         let sessionID = session.id
         let runID = UUID()
         let claudeRunner = queryRunner
@@ -294,9 +302,13 @@ public final class AppModel {
         watchesPaneRequestToken &+= 1
     }
 
+    public func requestNewQueryTab() {
+        startNewQuery()
+        newQueryTabRequestToken &+= 1
+    }
+
     public func dismissQueryResponse() {
-        cancelQueryTask(for: querySession.id)
-        querySession = QuerySession()
+        closeActiveQueryTab()
     }
 
     /// Send a follow-up question in the current Claude conversation when a
@@ -459,24 +471,69 @@ public final class AppModel {
     }
 
     public func selectHistorySession(_ record: QueryHistoryRecord) {
-        parkActiveQuerySessionIfNeeded()
         archiveSessionIfNeeded()
+        if selectExistingQueryTab(id: record.id) {
+            return
+        }
         let session = QuerySession(id: record.id)
         session.restore(turns: record.turns, claudeSessionID: record.claudeSessionID)
-        querySession = session
+        replaceActiveQueryTab(with: session, preservingRunningActiveTab: true)
     }
 
     public func selectPendingQuerySession(_ session: QuerySession) {
-        parkActiveQuerySessionIfNeeded()
         archiveSessionIfNeeded()
-        removeBackgroundQuerySession(id: session.id)
-        querySession = session
+        if !selectExistingQueryTab(id: session.id) {
+            appendQueryTab(session, activate: true)
+        }
     }
 
     public func startNewQuery() {
-        parkActiveQuerySessionIfNeeded()
         archiveSessionIfNeeded()
-        querySession = QuerySession()
+        appendQueryTab(QuerySession(), activate: true)
+    }
+
+    public func selectQueryTab(_ session: QuerySession) {
+        selectQueryTab(id: session.id)
+    }
+
+    public func selectQueryTab(id: UUID) {
+        guard querySession.id != id else { return }
+        archiveSessionIfNeeded()
+        _ = selectExistingQueryTab(id: id)
+    }
+
+    public func closeActiveQueryTab() {
+        closeQueryTab(id: querySession.id)
+    }
+
+    public func closeQueryTab(id: UUID) {
+        closeQueryTab(id: id, persistBeforeClosing: true)
+    }
+
+    private func closeQueryTab(id: UUID, persistBeforeClosing: Bool) {
+        guard let index = queryTabs.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let closingSession = queryTabs[index]
+        cancelQueryTask(for: closingSession.id)
+        if closingSession.status == .running {
+            closingSession.cancel()
+        }
+        if persistBeforeClosing {
+            persistSession(closingSession, moveToTop: false)
+        }
+
+        if queryTabs.count == 1 {
+            resetQueryTabs()
+            return
+        }
+
+        let wasActive = querySession.id == closingSession.id
+        queryTabs.remove(at: index)
+        if wasActive {
+            querySession = queryTabs[Swift.min(index, queryTabs.count - 1)]
+        }
     }
 
     /// Move a chat from active history into "Recently Deleted". If the chat is
@@ -497,8 +554,9 @@ public final class AppModel {
         saveHistory()
         saveDeletedHistory()
         if isActive {
-            cancelQueryTask(for: querySession.id)
-            querySession = QuerySession()
+            closeQueryTab(id: record.id, persistBeforeClosing: false)
+        } else {
+            closeOpenQueryTabs(matching: record.id)
         }
     }
 
@@ -534,7 +592,10 @@ public final class AppModel {
     private func saveSession(_ session: QuerySession, workspaceURL: URL) {
         guard isCurrentWorkspace(workspaceURL) else { return }
         persistSession(session, moveToTop: true)
-        removeBackgroundQuerySession(id: session.id)
+        if let index = queryTabs.firstIndex(where: { $0.id == session.id }),
+           queryTabs[index] !== session {
+            queryTabs[index] = session
+        }
         if querySession.id == session.id && querySession !== session {
             querySession.restore(turns: session.turns, claudeSessionID: session.claudeSessionID)
         }
@@ -561,18 +622,72 @@ public final class AppModel {
         upsertHistoryRecord(record)
     }
 
-    private func parkActiveQuerySessionIfNeeded() {
-        let session = querySession
-        guard session.status == .running,
-              activeQueryTasks[session.id] != nil,
-              !backgroundQuerySessions.contains(where: { $0.id == session.id }) else {
-            return
+    private func sessionForNewQuery() -> QuerySession {
+        if querySession.status == .idle && querySession.turns.isEmpty {
+            return querySession
         }
-        backgroundQuerySessions.insert(session, at: 0)
+
+        archiveSessionIfNeeded()
+        let session = QuerySession()
+        appendQueryTab(session, activate: true)
+        return session
     }
 
-    private func removeBackgroundQuerySession(id: UUID) {
-        backgroundQuerySessions.removeAll { $0.id == id }
+    private func resetQueryTabs() {
+        resetQueryTabs(to: QuerySession())
+    }
+
+    private func resetQueryTabs(to session: QuerySession) {
+        querySession = session
+        queryTabs = [session]
+    }
+
+    private func appendQueryTab(_ session: QuerySession, activate: Bool) {
+        queryTabs.removeAll { $0.id == session.id }
+        queryTabs.append(session)
+        if activate {
+            querySession = session
+        }
+    }
+
+    private func selectExistingQueryTab(id: UUID) -> Bool {
+        guard let session = queryTabs.first(where: { $0.id == id }) else {
+            return false
+        }
+        querySession = session
+        return true
+    }
+
+    private func replaceActiveQueryTab(
+        with session: QuerySession,
+        preservingRunningActiveTab: Bool = false
+    ) {
+        if preservingRunningActiveTab,
+           querySession.status == .running,
+           activeQueryTasks[querySession.id] != nil,
+           let activeIndex = queryTabs.firstIndex(where: { $0.id == querySession.id }) {
+            let insertionIndex = queryTabs.index(after: activeIndex)
+            queryTabs.insert(session, at: insertionIndex)
+            querySession = session
+            return
+        }
+
+        if let activeIndex = queryTabs.firstIndex(where: { $0.id == querySession.id }) {
+            queryTabs[activeIndex] = session
+        } else {
+            queryTabs.append(session)
+        }
+        querySession = session
+    }
+
+    private func closeOpenQueryTabs(matching id: UUID) {
+        queryTabs.removeAll { $0.id == id }
+        if querySession.id == id {
+            querySession = queryTabs.first ?? QuerySession()
+        }
+        if queryTabs.isEmpty {
+            resetQueryTabs()
+        }
     }
 
     private func cancelQueryTask(for sessionID: UUID) {
@@ -589,7 +704,6 @@ public final class AppModel {
             activeTask.task.cancel()
         }
         activeQueryTasks = [:]
-        backgroundQuerySessions = []
     }
 
     private func isCurrentWorkspace(_ url: URL) -> Bool {
@@ -1477,7 +1591,7 @@ public final class AppModel {
     private func setWorkspace(_ info: WorkspaceInfo) {
         cancelAllQueryTasks()
         workspace = info
-        querySession = QuerySession()
+        resetQueryTabs()
         queryHistory = []
         deletedQueryHistory = []
         showGraphPluginInstallPrompt = false

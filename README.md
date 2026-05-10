@@ -5,6 +5,10 @@
 ## Rhizome.app — the front door
 
 <p align="center">
+  <img src="docs/images/query-detail.png" alt="Rendered query answer with math and citations" width="640">
+</p>
+
+<p align="center">
   <img src="docs/images/launcher.png" alt="Rhizome menu-bar launcher" width="420">
 </p>
 
@@ -26,54 +30,32 @@ Under the hood, Rhizome runs `claude -p` as an agentic research session against 
 
 ## Install
 
-Rhizome.app needs **two things on your Mac before it will work**. Both are required — Rhizome will not function without them.
+### The easiest path — one script
 
-### 1. Install Obsidian (required)
-
-Rhizome stores everything as plain markdown in an Obsidian vault, and the app's "Open in Obsidian" / "Graph" buttons launch Obsidian directly.
-
-- Download from **[obsidian.md](https://obsidian.md)**.
-- Launch it once after installing so macOS registers it.
-
-### 2. Install Claude Code and sign in (required)
-
-Rhizome runs every query through `claude -p`. The CLI must be installed **and authenticated**, or queries will fail immediately.
-
-```bash
-npm i -g @anthropic-ai/claude-code
-claude                                # complete the sign-in flow once, then quit
-```
-
-You only need to authenticate once per machine. If `claude` isn't on your `PATH` after install, restart your terminal.
-
-### 3. Get Rhizome.app
-
-Pick one of these paths. **Option A is recommended** — it skips the Gatekeeper "untrusted app" prompt entirely because the app is built on your machine instead of downloaded.
-
-#### Option A — Build from source (recommended)
-
-This needs two extra developer tools. Install them once:
-
-| Tool | Install |
-|---|---|
-| Xcode Command Line Tools | `xcode-select --install` |
-| [`uv`](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-
-Then:
+If you want the shortest route to a working Rhizome.app, just clone this repo and run the build script. It compiles the app locally, which also skips the Gatekeeper "untrusted app" prompt you'd hit with a downloaded zip.
 
 ```bash
 git clone <this-repo>
 cd rhizome
-./scripts/build.sh
-cp -R dist/Rhizome.app /Applications/
-open /Applications/Rhizome.app
+./scripts/build.sh --update
 ```
 
-`build.sh` produces `dist/Rhizome.app` and launches it for you. Because the app was built locally rather than downloaded, macOS doesn't tag it as quarantined and it opens without the Gatekeeper warning.
+`./scripts/build.sh` produces `dist/Rhizome.app` and launches it for you. Then look for the Rhizome icon in your menu bar (top-right of the screen).
 
-#### Option B — Download the prebuilt zip
+You'll need these prerequisites on your Mac first — Rhizome will not function without all four:
 
-Faster if you don't want to install Xcode CLT and uv.
+| Requirement | Install |
+|---|---|
+| [Obsidian](https://obsidian.md) | Download and launch once so macOS registers it. |
+| [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) (signed in) | `npm i -g @anthropic-ai/claude-code` then run `claude` once to complete sign-in. |
+| Xcode Command Line Tools | `xcode-select --install` |
+| [`uv`](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+
+Rhizome stores everything as plain markdown in an Obsidian vault, and runs every query through `claude -p` — so both Obsidian and an authenticated Claude Code install are non-negotiable.
+
+### Alternative — download the prebuilt zip
+
+Faster if you don't want to install Xcode CLT and uv, but you'll have to clear the Gatekeeper quarantine flag manually.
 
 1. Grab the latest **`Rhizome.app.zip`** from the [Releases page](../../releases).
 2. Unzip it and drag `Rhizome.app` into `/Applications`.
@@ -84,7 +66,7 @@ Faster if you don't want to install Xcode CLT and uv.
    ```
    You only need to do this once per install. (Equivalent alternatives: right-click the app → Open, or approve it in System Settings → Privacy & Security after a blocked launch.)
 
-Either way, look for the Rhizome icon in your menu bar (top-right of the screen) once the app is open.
+You still need Obsidian and an authenticated Claude Code install — see the table above.
 
 On first launch, Rhizome creates a default workspace at `~/wiki` called "Rhizome" and installs the Claude Code commands that target it.
 
