@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 compile = "compile.cli:main"
+rhizome-mcp = "compile.mcp_server:main"
 
 [dependency-groups]
 dev = [

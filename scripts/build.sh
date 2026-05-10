@@ -26,6 +26,9 @@ uv run pyinstaller "$APP_ROOT/support/compile-bin.spec" \
   --distpath "$SIDECAR_DIST" \
   --workpath "$SIDECAR_BUILD"
 
+echo "Verifying compile-bin MCP command..."
+"$SIDECAR_DIST/compile-bin" mcp --help >/dev/null
+
 echo "Building Rhizome executable..."
 swift build --package-path "$APP_ROOT" -c release --product Rhizome >/dev/null
 APP_BIN_DIR="$(swift build --package-path "$APP_ROOT" -c release --show-bin-path)"

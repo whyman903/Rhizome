@@ -145,6 +145,63 @@ Use these from Rhizome.app or from a Claude Code session launched by the app:
 
 You can hand-edit any of these at `<workspace>/.claude/commands/*.md` or `~/.claude/commands/*.md` — open them from Rhizome's Settings → Claude Commands. Your edits survive app restarts.
 
+### MCP server
+
+Rhizome includes a read-only MCP server so Claude Desktop, Claude Code, ChatGPT connectors, and other MCP clients can search and read the wiki through a narrow tool surface.
+
+Available tools:
+
+- `wiki_overview` — workspace status, page counts, graph health, and issue summaries.
+- `search_wiki` — search titles, summaries, body text, tags, aliases, and indexed PDF chunks when present.
+- `search` — OpenAI connector-compatible alias returning `results` with `id`, `title`, and `url`.
+- `read_wiki_page` — read a bounded markdown page by title, alias, wikilink, file name, or relative path.
+- `fetch` — OpenAI connector-compatible alias returning a fetched document by search result `id`.
+- `page_neighbors` — backlinks, outbound links, related pages, and supporting sources.
+- `list_wiki_pages` — page inventory, optionally filtered by type.
+
+The canonical packaged command is `compile-bin mcp`. During repo development, `uv --quiet --directory /path/to/rhizome run rhizome-mcp --workspace /path/to/wiki` is equivalent.
+
+For local MCP clients such as Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "rhizome": {
+      "command": "/Applications/Rhizome.app/Contents/Resources/compile-bin",
+      "args": [
+        "mcp",
+        "--path",
+        "/path/to/wiki"
+      ]
+    }
+  }
+}
+```
+
+For ChatGPT connector development, run the stateless HTTP transport and expose it through an HTTPS tunnel such as ngrok or Cloudflare Tunnel:
+
+```bash
+export RHIZOME_MCP_HTTP_TOKEN="choose-a-long-random-token"
+/Applications/Rhizome.app/Contents/Resources/compile-bin mcp \
+  --path /path/to/wiki \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --allow-origin https://chatgpt.com \
+  --allow-origin https://chat.openai.com
+```
+
+Then register the public tunnel URL ending in `/mcp` in ChatGPT Settings → Connectors → Create.
+
+Security notes:
+
+- The HTTP transport is read-only but can still expose private wiki content. Treat the tunnel URL and bearer token as secrets.
+- HTTP requests with an `Origin` header are rejected unless the origin is explicitly allowlisted with `--allow-origin`.
+- Non-browser clients may send no `Origin` header, so the bearer token is the real defense for tunneled or remote access.
+- Set `RHIZOME_MCP_HTTP_TOKEN` or pass `--http-token` when exposing the server beyond localhost. The server refuses to start unauthenticated HTTP on non-localhost interfaces.
+- The HTTP transport is intentionally minimal and stateless: it supports JSON-RPC over POST and single-response SSE, but not resumable sessions or server-initiated notifications.
+- `compile mcp` and `rhizome-mcp` accept the same flags; `compile-bin mcp` is the packaged app form.
+
 ---
 
 ## Watches — automated pulls

@@ -33,10 +33,12 @@ _NAV_DOWNRANK_EXEMPT_REASONS = _STRONG_LOCATOR_REASONS | {"summary-match"}
 
 
 IGNORED_DIRS = {
+    ".build",
     ".compile",
     ".git",
     ".obsidian",
     ".pytest_cache",
+    ".swiftpm",
     ".venv",
     "__pycache__",
     "build",
@@ -340,8 +342,8 @@ class GraphReport:
 class ObsidianConnector:
     """Scan a markdown vault and surface Obsidian-relevant graph quality signals."""
 
-    def __init__(self, root: Path) -> None:
-        self.root = discover_vault_root(root)
+    def __init__(self, root: Path, *, discover_root: bool = True) -> None:
+        self.root = discover_vault_root(root) if discover_root else root.resolve()
         self.page_root, self.layout = self._detect_layout(self.root)
         self.obsidian_dir = self.root / ".obsidian"
         self._pages: list[VaultPage] | None = None

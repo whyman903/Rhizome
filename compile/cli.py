@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any, Callable
@@ -26,6 +27,7 @@ from compile.ingest import (
     render_full_text_callout,
     render_source_body,
 )
+from compile.mcp_server import run_mcp_server
 from compile.obsidian import ObsidianConnector
 from compile.outputs import generate_canvas, generate_chart, generate_marp
 from compile.pdf_artifacts import (
@@ -455,6 +457,56 @@ def _format_watches_summary(info: dict[str, Any]) -> str:
     if parts:
         return f"{total} ({', '.join(parts)})"
     return str(total)
+
+
+@main.command("mcp")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "http"]),
+    default="stdio",
+    show_default=True,
+    help="MCP transport.",
+)
+@click.option("--host", default="127.0.0.1", show_default=True, help="HTTP host.")
+@click.option("--port", default=8765, show_default=True, help="HTTP port.")
+@click.option(
+    "--allow-origin",
+    multiple=True,
+    help="Allowed HTTP Origin. Repeat for multiple origins.",
+)
+@click.option(
+    "--http-token",
+    default=None,
+    envvar="RHIZOME_MCP_HTTP_TOKEN",
+    help="Optional bearer token required by HTTP transport.",
+)
+def mcp(
+    path: str,
+    transport: str,
+    host: str,
+    port: int,
+    allow_origin: tuple[str, ...],
+    http_token: str | None,
+) -> None:
+    """Run the read-only Rhizome MCP server."""
+    env_origins = [
+        origin.strip()
+        for origin in os.environ.get("RHIZOME_MCP_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    try:
+        run_mcp_server(
+            workspace_root=Path(path).resolve(),
+            transport=transport,
+            host=host,
+            port=port,
+            allowed_origins=set(allow_origin) | set(env_origins),
+            http_token=http_token,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1)
 
 
 @main.command()
