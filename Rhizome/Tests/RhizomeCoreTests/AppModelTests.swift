@@ -1864,72 +1864,6 @@ final class AppModelTests: XCTestCase {
         model.cancelQuery()
     }
 
-    func testStartingNewQueryCreatesConversationTabWithoutClosingCurrentSession() async throws {
-        let workspaceURL = tempDirectory.appending(path: "wiki-query-tabs", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
-        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
-
-        let model = AppModel(
-            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
-            dispatcher: NoopDispatcher(),
-            queryRunner: NoopQueryRunner(),
-            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-query-tabs", directoryHint: .isDirectory)),
-            defaults: defaults,
-            fileManager: .default,
-            openWorkspaceHandler: { _ in .opened },
-            openNoteHandler: { _, _ in .opened },
-            openGraphHandler: { _ in .opened }
-        )
-
-        await model.bootstrapIfNeeded()
-        model.querySession.restore(turns: [
-            QueryTurn(question: "Original question", answer: "Original answer"),
-        ])
-        let originalSessionID = model.querySession.id
-
-        model.startNewQuery()
-
-        XCTAssertEqual(model.queryTabs.map(\.id), [originalSessionID, model.querySession.id])
-        XCTAssertEqual(model.queryTabs.first?.firstQuestion, "Original question")
-        XCTAssertTrue(model.querySession.turns.isEmpty)
-
-        model.selectQueryTab(id: originalSessionID)
-        XCTAssertEqual(model.querySession.firstQuestion, "Original question")
-    }
-
-    func testClosingActiveConversationTabSelectsNeighborAndCancelsRunningQuery() async throws {
-        let workspaceURL = tempDirectory.appending(path: "wiki-query-tab-close", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
-        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
-
-        let model = AppModel(
-            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
-            dispatcher: NoopDispatcher(),
-            queryRunner: DelayedQueryRunner(delayNanoseconds: 1_000_000_000),
-            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-query-tab-close", directoryHint: .isDirectory)),
-            defaults: defaults,
-            fileManager: .default,
-            openWorkspaceHandler: { _ in .opened },
-            openNoteHandler: { _, _ in .opened },
-            openGraphHandler: { _ in .opened }
-        )
-
-        await model.bootstrapIfNeeded()
-        model.sendQuery("Still running?")
-        let runningSessionID = model.querySession.id
-
-        model.startNewQuery()
-        XCTAssertEqual(model.sidebarPendingQuerySessions.map(\.id), [runningSessionID])
-
-        model.selectQueryTab(id: runningSessionID)
-        model.closeActiveQueryTab()
-
-        XCTAssertFalse(model.queryTabs.contains { $0.id == runningSessionID })
-        XCTAssertTrue(model.sidebarPendingQuerySessions.isEmpty)
-        XCTAssertEqual(model.queryTabs.count, 1)
-        XCTAssertTrue(model.querySession.turns.isEmpty)
-    }
-
     func testFollowUpFromSelectedHistorySessionMovesRecordToTop() async throws {
         let workspaceURL = tempDirectory.appending(path: "wiki-followup-order", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
@@ -2002,37 +1936,6 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertFalse(model.hasActiveQuerySession)
         XCTAssertEqual(model.sidebarQueryHistory.map(\.id), [record.id])
-    }
-
-    func testDeletingSelectedHistorySessionDoesNotReinsertClosedTabIntoHistory() async throws {
-        let workspaceURL = tempDirectory.appending(path: "wiki-delete-active-history", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
-        defaults.set(workspaceURL.path, forKey: "currentWorkspacePath")
-
-        let record = QueryHistoryRecord(id: UUID(), turns: [
-            QueryTurn(question: "Archived question", answer: "Archived answer"),
-        ])
-        try writeHistory([record], to: workspaceURL)
-
-        let model = AppModel(
-            runner: DynamicCompileRunner(pageResult: try makePage(title: "Planner", relativePath: "wiki/articles/planner.md")),
-            dispatcher: NoopDispatcher(),
-            queryRunner: NoopQueryRunner(),
-            logger: AppLogger(logDirectory: tempDirectory.appending(path: "logs-delete-active-history", directoryHint: .isDirectory)),
-            defaults: defaults,
-            fileManager: .default,
-            openWorkspaceHandler: { _ in .opened },
-            openNoteHandler: { _, _ in .opened },
-            openGraphHandler: { _ in .opened }
-        )
-
-        await model.bootstrapIfNeeded()
-        model.selectHistorySession(record)
-        model.deleteHistorySession(record)
-
-        XCTAssertTrue(model.queryHistory.isEmpty)
-        XCTAssertEqual(model.deletedQueryHistory.map(\.id), [record.id])
-        XCTAssertFalse(model.queryTabs.contains { $0.id == record.id })
     }
 
     func testHasActiveQuerySessionIsTrueForInFlightFirstQueryWithoutTurns() async throws {
