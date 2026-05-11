@@ -14,6 +14,7 @@ public protocol WatchSidecarRunning: AnyObject, Sendable {
     ) async throws -> WatchRecord
     func pause(_ locator: String, at workspace: URL) async throws -> WatchRecord
     func resume(_ locator: String, at workspace: URL) async throws -> WatchRecord
+    func updateIntent(_ locator: String, intent: String, at workspace: URL) async throws -> WatchRecord
     func remove(_ locator: String, keepPage: Bool, at workspace: URL) async throws
     func runOnce(
         _ locator: String,
@@ -103,6 +104,17 @@ public final class WatchSidecar: WatchSidecarRunning, @unchecked Sendable {
     public func resume(_ locator: String, at workspace: URL) async throws -> WatchRecord {
         try await decodeWatchEnvelope(
             arguments: ["watch", "resume", locator, "--path", workspace.path, "--json-output"]
+        )
+    }
+
+    public func updateIntent(_ locator: String, intent: String, at workspace: URL) async throws -> WatchRecord {
+        try await decodeWatchEnvelope(
+            arguments: [
+                "watch", "update", locator,
+                "--intent", intent,
+                "--path", workspace.path,
+                "--json-output",
+            ]
         )
     }
 

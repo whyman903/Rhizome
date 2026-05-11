@@ -66,6 +66,31 @@ def test_watch_list_returns_array(tmp_path: Path) -> None:
     assert titles == ["One", "Two"]
 
 
+def test_watch_update_changes_prompt_via_cli(tmp_path: Path) -> None:
+    _make_workspace(tmp_path)
+    _add_runner(tmp_path, title="PromptWatch")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "watch",
+            "update",
+            "PromptWatch",
+            "--intent",
+            "Track only substantive product changes.",
+            "--path",
+            str(tmp_path),
+            "--json-output",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output.strip())
+    assert payload["ok"] is True
+    assert payload["watch"]["intent"] == "Track only substantive product changes."
+
+
 def test_watch_pause_resume_remove_via_cli(tmp_path: Path) -> None:
     _make_workspace(tmp_path)
     _add_runner(tmp_path, title="Cycler")

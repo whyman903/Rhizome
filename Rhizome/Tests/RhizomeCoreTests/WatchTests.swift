@@ -169,4 +169,38 @@ final class WatchTests: XCTestCase {
             XCTAssertTrue(error.message.contains("claude failed"), "got: \(error.message)")
         }
     }
+
+    func testWatchSidecarUpdateIntentPassesWatchUpdateArguments() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let fakeURL = tmpDir.appendingPathComponent("fake-compile-update.sh")
+        let argsURL = tmpDir.appendingPathComponent("args.txt")
+        let payload = """
+        {"ok":true,"watch":{"watch_id":"x","title":"X","relative_path":"wiki/watches/X.md","url":"https://e.com","frequency":"daily","intent":"Updated prompt","watch_status":"active","last_status":null,"last_run":null,"next_run":null,"run_count":0,"consecutive_failures":0,"last_error":null}}
+        """
+        let script = """
+        #!/bin/bash
+        printf '%s\\n' "$@" > '\(argsURL.path)'
+        echo '\(payload)'
+        """
+        try script.write(to: fakeURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeURL.path)
+
+        let sidecar = WatchSidecar(logger: AppLogger()) {
+            fakeURL
+        }
+        let watch = try await sidecar.updateIntent("x", intent: "Updated prompt", at: tmpDir)
+        let args = try String(contentsOf: argsURL, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+
+        XCTAssertEqual(watch.intent, "Updated prompt")
+        XCTAssertEqual(Array(args.prefix(3)), ["watch", "update", "x"])
+        XCTAssertEqual(Array(args.drop(while: { $0 != "--intent" }).prefix(2)), ["--intent", "Updated prompt"])
+        XCTAssertTrue(args.contains(tmpDir.path))
+        XCTAssertTrue(args.contains("--json-output"))
+    }
 }

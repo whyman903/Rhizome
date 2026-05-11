@@ -163,6 +163,33 @@ def test_list_returns_added_watch(tmp_path: Path) -> None:
     assert state_payload["watches"][0]["title"] == "Alpha Watch"
 
 
+def test_update_watch_rewrites_prompt_frontmatter_body_and_state(tmp_path: Path) -> None:
+    _make_workspace(tmp_path)
+    config = load_config(tmp_path)
+    record = watch_module.add_watch(
+        config,
+        url="https://example.com/a",
+        frequency="weekly",
+        intent="Original prompt.",
+        title="Prompt Watch",
+    )
+
+    updated = watch_module.update_watch(
+        config,
+        record.watch_id,
+        intent="Updated prompt with a sharper monitoring goal.",
+    )
+
+    assert updated.intent == "Updated prompt with a sharper monitoring goal."
+    assert updated.frequency == "weekly"
+    page_text = (tmp_path / record.relative_path).read_text()
+    assert "watch_intent: Updated prompt with a sharper monitoring goal." in page_text
+    assert "## Intent\n\nUpdated prompt with a sharper monitoring goal." in page_text
+    assert "Original prompt." not in page_text
+    state_payload = json.loads((tmp_path / ".compile" / "watches.json").read_text())
+    assert state_payload["watches"][0]["intent"] == "Updated prompt with a sharper monitoring goal."
+
+
 def test_pause_then_resume_flips_status_and_clears_failures(tmp_path: Path) -> None:
     _make_workspace(tmp_path)
     config = load_config(tmp_path)

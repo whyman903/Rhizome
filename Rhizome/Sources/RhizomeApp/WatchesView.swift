@@ -9,6 +9,7 @@ final class WatchesViewModel {
     var isLoading = false
     var lastError: String?
     var pendingRunIDs: Set<String> = []
+    var pendingEditIDs: Set<String> = []
 
     private let sidecar: WatchSidecarRunning
     private let workspaceProvider: @MainActor () -> URL?
@@ -91,6 +92,20 @@ final class WatchesViewModel {
         }
     }
 
+    func updateIntent(_ record: WatchRecord, intent: String) async -> Bool {
+        guard let workspace = workspaceProvider() else { return false }
+        pendingEditIDs.insert(record.id)
+        defer { pendingEditIDs.remove(record.id) }
+        do {
+            _ = try await sidecar.updateIntent(record.id, intent: intent, at: workspace)
+            await reload()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
     func remove(_ record: WatchRecord) async {
         guard let workspace = workspaceProvider() else { return }
         do {
@@ -113,6 +128,7 @@ private struct CountChipPiece: Identifiable {
 struct WatchesView: View {
     @Bindable var viewModel: WatchesViewModel
     @State private var showAddForm = false
+    @State private var editingWatchID: String?
     @State private var pendingRemoval: WatchRecord?
 
     var body: some View {
@@ -284,14 +300,45 @@ struct WatchesView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(viewModel.watches) { watch in
-                        WatchCard(
-                            record: watch,
-                            isRunning: viewModel.pendingRunIDs.contains(watch.id),
-                            onOpen: { viewModel.openPage(watch) },
-                            onRun: { Task { await viewModel.runOnce(watch) } },
-                            onPause: { Task { await viewModel.togglePauseResume(watch) } },
-                            onRemove: { pendingRemoval = watch }
-                        )
+                        VStack(spacing: 8) {
+                            WatchCard(
+                                record: watch,
+                                isRunning: viewModel.pendingRunIDs.contains(watch.id),
+                                isEditing: editingWatchID == watch.id,
+                                onOpen: { viewModel.openPage(watch) },
+                                onRun: { Task { await viewModel.runOnce(watch) } },
+                                onPause: { Task { await viewModel.togglePauseResume(watch) } },
+                                onEdit: {
+                                    withAnimation(.easeOut(duration: 0.16)) {
+                                        editingWatchID = editingWatchID == watch.id ? nil : watch.id
+                                    }
+                                },
+                                onRemove: { pendingRemoval = watch }
+                            )
+
+                            if editingWatchID == watch.id {
+                                WatchPromptEditorCard(
+                                    record: watch,
+                                    isSaving: viewModel.pendingEditIDs.contains(watch.id),
+                                    onCancel: {
+                                        withAnimation(.easeOut(duration: 0.16)) {
+                                            editingWatchID = nil
+                                        }
+                                    },
+                                    onSubmit: { intent in
+                                        Task {
+                                            let ok = await viewModel.updateIntent(watch, intent: intent)
+                                            if ok {
+                                                withAnimation(.easeOut(duration: 0.16)) {
+                                                    editingWatchID = nil
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -353,9 +400,11 @@ struct WatchesView: View {
 private struct WatchCard: View {
     let record: WatchRecord
     let isRunning: Bool
+    let isEditing: Bool
     let onOpen: () -> Void
     let onRun: () -> Void
     let onPause: () -> Void
+    let onEdit: () -> Void
     let onRemove: () -> Void
 
     @State private var isHovering = false
@@ -525,6 +574,12 @@ private struct WatchCard: View {
                 help: record.watchStatus == "paused" ? "Resume schedule" : "Pause schedule",
                 action: onPause
             )
+            actionButton(
+                icon: "pencil",
+                label: isEditing ? "Close Editor" : "Edit Prompt",
+                help: isEditing ? "Close prompt editor" : "Edit watch prompt",
+                action: onEdit
+            )
             Spacer(minLength: 0)
             actionButton(
                 icon: "trash",
@@ -554,6 +609,132 @@ private struct WatchCard: View {
             isDisabled: isDisabled,
             isAnimating: isAnimating,
             isDestructive: isDestructive
+        )
+    }
+}
+
+private struct WatchPromptEditorCard: View {
+    let record: WatchRecord
+    let isSaving: Bool
+    let onCancel: () -> Void
+    let onSubmit: (String) -> Void
+
+    @State private var intent: String
+    @FocusState private var isFocused: Bool
+
+    init(
+        record: WatchRecord,
+        isSaving: Bool,
+        onCancel: @escaping () -> Void,
+        onSubmit: @escaping (String) -> Void
+    ) {
+        self.record = record
+        self.isSaving = isSaving
+        self.onCancel = onCancel
+        self.onSubmit = onSubmit
+        _intent = State(initialValue: record.intent)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.quote")
+                    .font(.system(size: 11))
+                    .foregroundStyle(EditorialPalette.accent)
+                Text("Edit Prompt")
+                    .font(.system(size: 12.5, weight: .semibold, design: activeFont.design))
+                    .foregroundStyle(EditorialPalette.textPrimary)
+                Spacer(minLength: 0)
+                Text(record.title)
+                    .font(.system(size: 10.5, design: activeFont.design))
+                    .foregroundStyle(EditorialPalette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            promptEditor
+
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button(action: onCancel) {
+                    Text("Cancel")
+                        .font(.system(size: 11.5, weight: .medium, design: activeFont.design))
+                }
+                .buttonStyle(WatchSecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                .disabled(isSaving)
+
+                Button { onSubmit(trimmedIntent) } label: {
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(EditorialPalette.background)
+                        }
+                        Text(isSaving ? "Saving…" : "Save Prompt")
+                            .font(.system(size: 11.5, weight: .semibold, design: activeFont.design))
+                    }
+                }
+                .buttonStyle(WatchPrimaryButtonStyle(prominent: true))
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSubmit || isSaving)
+                .opacity(canSubmit && !isSaving ? 1 : 0.55)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(EditorialPalette.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(EditorialPalette.accent.opacity(0.30), lineWidth: 1)
+        )
+        .onAppear { isFocused = true }
+    }
+
+    private var trimmedIntent: String {
+        intent.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmit: Bool {
+        !trimmedIntent.isEmpty && trimmedIntent != record.intent.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var promptEditor: some View {
+        let nsFont = NSFont.systemFont(ofSize: 12)
+        return ZStack(alignment: .topLeading) {
+            if intent.isEmpty {
+                Text("Tell Claude what to extract, compare, or monitor each time this watch runs.")
+                    .font(.system(size: 12, design: activeFont.design).italic())
+                    .foregroundStyle(EditorialPalette.textTertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .allowsHitTesting(false)
+            }
+            InsetlessTextEditor(
+                text: $intent,
+                font: nsFont,
+                textColor: NSColor(EditorialPalette.textPrimary),
+                autoFocus: false
+            )
+            .focused($isFocused)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(minHeight: 88, maxHeight: 150)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(EditorialPalette.background)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(
+                    isFocused
+                        ? EditorialPalette.accent.opacity(0.45)
+                        : EditorialPalette.border,
+                    lineWidth: 1
+                )
         )
     }
 }

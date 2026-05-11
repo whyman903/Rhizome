@@ -1641,6 +1641,28 @@ def watch_show(locator: str, path: str, json_output: bool) -> None:
     console.print(json.dumps(_watch_payload(record), indent=2, sort_keys=True))
 
 
+@watch.command("update")
+@click.argument("locator")
+@click.option("--intent", "-i", required=True, help="Replacement plain-language watch prompt.")
+@click.option("--path", "-p", default=".", help="Workspace root.")
+@click.option("--json-output/--no-json-output", default=False)
+def watch_update(locator: str, intent: str, path: str, json_output: bool) -> None:
+    from compile.watch import update_watch
+    config = load_config(Path(path).resolve())
+    try:
+        record = update_watch(config, locator, intent=intent)
+    except (FileNotFoundError, ValueError) as exc:
+        if json_output:
+            _emit_machine_error(str(exc), context="watch update")
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    if json_output:
+        _emit_json({"ok": True, "watch": _watch_payload(record)})
+        return
+    console.print(f"[green]Updated:[/green] {record.title}")
+
+
 @watch.command("pause")
 @click.argument("locator")
 @click.option("--path", "-p", default=".", help="Workspace root.")

@@ -5,7 +5,7 @@ page frontmatter is the source of truth for config; the JSON state file is a fas
 scheduler index that can be rebuilt from frontmatter at any time.
 
 Public surface:
-    add_watch / list_watches / get_watch / pause_watch / resume_watch / remove_watch
+    add_watch / list_watches / get_watch / update_watch / pause_watch / resume_watch / remove_watch
     run_watch                       — synthesize a single watch right now
     tick                            — synthesize every watch whose next_run is due
     parse_frequency / next_fire_time — frequency vocabulary
@@ -377,6 +377,29 @@ def list_watches(config: Config) -> list[Watch]:
 def get_watch(config: Config, locator: str) -> Watch:
     page = _get_watch_page(config, locator)
     return _watch_from_page(page)
+
+
+def update_watch(
+    config: Config,
+    locator: str,
+    *,
+    intent: str | None = None,
+) -> Watch:
+    page = _get_watch_page(config, locator)
+    body = page.body
+    update: dict[str, Any] = {}
+
+    if intent is not None:
+        cleaned_intent = intent.strip()
+        if not cleaned_intent:
+            raise ValueError("intent is required")
+        update["watch_intent"] = cleaned_intent
+        update["summary"] = _summary_from_intent(cleaned_intent)
+        body = _replace_intent_section(body, cleaned_intent)
+
+    if not update:
+        return _watch_from_page(page)
+    return _rewrite_page(config, page, body=body, extra_frontmatter=update)
 
 
 def pause_watch(config: Config, locator: str) -> Watch:
@@ -786,6 +809,20 @@ def _initial_body(*, intent: str, url: str, frequency: str) -> str:
         "## Digests\n\n"
         "_No runs yet. Use `compile watch run \"this watch\"` to fire one now._\n"
     )
+
+
+def _replace_intent_section(body: str, intent: str) -> str:
+    replacement = f"## Intent\n\n{intent.strip()}\n\n"
+    pattern = re.compile(r"(?ms)^## Intent\s*\n.*?(?=^## Digests\s*$|\Z)")
+    if pattern.search(body):
+        return pattern.sub(replacement, body, count=1).rstrip() + "\n"
+
+    digests_marker = "## Digests"
+    if digests_marker in body:
+        before, _, after = body.partition(digests_marker)
+        return f"{before.rstrip()}\n\n{replacement}{digests_marker}{after}".rstrip() + "\n"
+
+    return f"{body.rstrip()}\n\n{replacement}".rstrip() + "\n"
 
 
 def _summary_from_intent(intent: str) -> str:
