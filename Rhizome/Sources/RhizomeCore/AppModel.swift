@@ -1458,17 +1458,20 @@ public final class AppModel {
     }
 
     public func chooseFilesForIngest() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Add Files"
-        panel.message = "Choose files to hand off to Claude."
-        panel.level = .modalPanel
-        guard panel.runModal() == .OK else {
-            return
+        NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor in
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = true
+            panel.prompt = "Add Files"
+            panel.message = "Choose files to hand off to Claude."
+            panel.level = .popUpMenu
+            guard panel.runModal() == .OK else {
+                return
+            }
+            launchDraftSession(files: panel.urls, text: "")
         }
-        launchDraftSession(files: panel.urls, text: "")
     }
 
     public func revealWorkspaceInFinder() {
