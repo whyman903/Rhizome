@@ -504,9 +504,6 @@ private struct WatchCard: View {
             if let lastRun = WatchFormatting.relativeTimeLabel(record.lastRun) {
                 metaItem(icon: "checkmark.circle", label: "Last \(lastRun)")
             }
-            if record.runCount > 0 {
-                metaItem(icon: "number", label: "\(record.runCount) run\(record.runCount == 1 ? "" : "s")")
-            }
             Spacer(minLength: 0)
         }
         .font(.system(size: 10.5, design: activeFont.design))

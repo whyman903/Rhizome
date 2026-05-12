@@ -45,6 +45,51 @@ ACTIVE_WORKSPACE_POINTER = (
     Path.home() / "Library" / "Application Support" / "Rhizome" / "active-workspace"
 )
 
+# Persistent tick log. The launchd plist cannot reliably redirect stdout via
+# StandardOutPath with a home-relative path, so the tick command writes its own
+# structured log line on every invocation. Capped to keep the file from growing
+# without bound when the agent fires every 15 minutes.
+TICK_LOG_PATH = Path.home() / "Library" / "Logs" / "Rhizome" / "watch-tick.log"
+TICK_LOG_MAX_BYTES = 256 * 1024
+
+
+def _append_tick_log(payload: dict[str, Any]) -> None:
+    """Append a single JSON line to the persistent tick log. Best-effort."""
+    try:
+        TICK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps({"ts": _isoformat(_utcnow()), **payload}) + "\n"
+        try:
+            if TICK_LOG_PATH.exists() and TICK_LOG_PATH.stat().st_size > TICK_LOG_MAX_BYTES:
+                tail = TICK_LOG_PATH.read_text(errors="replace").splitlines()[-200:]
+                TICK_LOG_PATH.write_text("\n".join(tail) + "\n")
+        except OSError:
+            pass
+        with TICK_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError:
+        pass
+
+
+def log_tick_run(
+    *,
+    workspace: Path | None,
+    events: list[dict[str, Any]] | None = None,
+    error: str | None = None,
+) -> None:
+    """Public hook the CLI uses to record every tick invocation."""
+    payload: dict[str, Any] = {
+        "workspace": str(workspace) if workspace else None,
+    }
+    if error is not None:
+        payload["status"] = "error"
+        payload["error"] = error[:500]
+    else:
+        payload["status"] = "ok"
+        payload["count"] = len(events or [])
+        if events:
+            payload["events"] = events
+    _append_tick_log(payload)
+
 
 class ActiveWorkspaceUnavailable(RuntimeError):
     """Raised when the scheduled launchd agent cannot find a workspace to tick."""
@@ -275,7 +320,6 @@ class Watch:
     last_status: str | None      # ok | failed | unchanged
     last_run: str | None
     next_run: str | None
-    run_count: int
     consecutive_failures: int
     last_error: str | None
 
@@ -346,11 +390,14 @@ def add_watch(
         "watch_status": "active",
         "watch_last_run": None,
         "watch_next_run": _isoformat(next_run),
-        "watch_run_count": 0,
         "watch_consecutive_failures": 0,
         "watch_last_status": None,
         "watch_last_error": None,
         "watch_last_content_hash": None,
+        # Watch pages don't need the editorial page-status field or a derived
+        # summary; pass None so upsert_page strips them if present.
+        "status": None,
+        "summary": None,
     }
 
     body = _initial_body(intent=intent, url=url, frequency=frequency_obj.serialize())
@@ -359,7 +406,6 @@ def add_watch(
         body=body,
         page_type="watch",
         tags=sorted({"watch", *(tags or [])}),
-        summary=_summary_from_intent(intent),
         extra_frontmatter=extra,
         ensure_title_heading=True,
     )
@@ -394,7 +440,6 @@ def update_watch(
         if not cleaned_intent:
             raise ValueError("intent is required")
         update["watch_intent"] = cleaned_intent
-        update["summary"] = _summary_from_intent(cleaned_intent)
         body = _replace_intent_section(body, cleaned_intent)
 
     if not update:
@@ -522,7 +567,6 @@ def _run_one(
             update = {
                 "watch_last_run": _isoformat(now),
                 "watch_next_run": _isoformat(next_fire_time(frequency, after=now)),
-                "watch_run_count": watch.run_count + 1,
                 "watch_last_status": "unchanged",
                 "watch_consecutive_failures": 0,
                 "watch_last_error": None,
@@ -555,7 +599,6 @@ def _run_one(
         update = {
             "watch_last_run": _isoformat(now),
             "watch_next_run": _isoformat(next_fire_time(frequency, after=now)),
-            "watch_run_count": watch.run_count + 1,
             "watch_last_status": "ok",
             "watch_consecutive_failures": 0,
             "watch_last_error": None,
@@ -761,6 +804,15 @@ def _rewrite_page(
     extra_frontmatter: dict[str, Any],
 ) -> Watch:
     connector = ObsidianConnector(config.workspace_root)
+    # Watch pages strip the editorial-style `status`, `summary`, and the
+    # legacy `watch_run_count` fields on every rewrite so existing pages
+    # converge on the slim schema.
+    extra = {
+        "status": None,
+        "summary": None,
+        "watch_run_count": None,
+        **extra_frontmatter,
+    }
     new_page = connector.upsert_page(
         title=page.title,
         body=body,
@@ -768,9 +820,8 @@ def _rewrite_page(
         tags=page.tags,
         sources=[],
         aliases=page.aliases,
-        summary=str(page.frontmatter.get("summary") or "").strip() or None,
         relative_path=page.relative_path,
-        extra_frontmatter=extra_frontmatter,
+        extra_frontmatter=extra,
         ensure_title_heading=False,
     )
     _sync_state_from_pages(config)
@@ -823,11 +874,6 @@ def _replace_intent_section(body: str, intent: str) -> str:
         return f"{before.rstrip()}\n\n{replacement}{digests_marker}{after}".rstrip() + "\n"
 
     return f"{body.rstrip()}\n\n{replacement}".rstrip() + "\n"
-
-
-def _summary_from_intent(intent: str) -> str:
-    cleaned = re.sub(r"\s+", " ", intent.strip())
-    return cleaned[:160]
 
 
 def _title_from_url(url: str) -> str:
@@ -892,7 +938,6 @@ def _watch_from_page(page: VaultPage) -> Watch:
         last_status=(str(fm.get("watch_last_status")) if fm.get("watch_last_status") else None),
         last_run=(str(fm.get("watch_last_run")) if fm.get("watch_last_run") else None),
         next_run=(str(fm.get("watch_next_run")) if fm.get("watch_next_run") else None),
-        run_count=int(fm.get("watch_run_count") or 0),
         consecutive_failures=int(fm.get("watch_consecutive_failures") or 0),
         last_error=(str(fm.get("watch_last_error")) if fm.get("watch_last_error") else None),
     )

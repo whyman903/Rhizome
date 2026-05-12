@@ -183,11 +183,16 @@ def test_full_watch_lifecycle_via_cli(
     fm = _read_frontmatter(page_path)
     expected_keys = {
         "title", "type", "watch_id", "watch_url", "watch_frequency",
-        "watch_intent", "watch_status", "watch_next_run", "watch_run_count",
+        "watch_intent", "watch_status", "watch_next_run",
         "watch_consecutive_failures",
     }
     missing = expected_keys - set(fm.keys())
     assert not missing, f"missing frontmatter keys: {missing}"
+    # Watch pages don't carry editorial `status`, `summary`, or the legacy
+    # `watch_run_count` field — kept slim so they don't pollute the vault.
+    assert "watch_run_count" not in fm
+    assert "summary" not in fm
+    assert "status" not in fm
     assert fm["type"] == "watch"
     assert fm["watch_status"] == "active"
     assert fm["watch_url"] == "https://example.com/news"
@@ -223,7 +228,6 @@ def test_full_watch_lifecycle_via_cli(
     assert len(raw_files) >= 1, "expected at least one raw archive after first run"
 
     fm = _read_frontmatter(page_path)
-    assert fm["watch_run_count"] == 1
     assert fm["watch_last_status"] == "ok"
     assert fm["watch_consecutive_failures"] == 0
 
@@ -248,7 +252,6 @@ def test_full_watch_lifecycle_via_cli(
     assert len(claude.calls) == 1, "Claude must NOT be re-invoked when content is unchanged"
 
     fm = _read_frontmatter(page_path)
-    assert fm["watch_run_count"] == 2
     assert fm["watch_last_status"] == "unchanged"
 
     # --- 6. Force-run with NEW content: digests stack newest-first ---------
@@ -273,8 +276,7 @@ def test_full_watch_lifecycle_via_cli(
 
     # Frontmatter still parses cleanly after multiple rewrites.
     fm = _read_frontmatter(page_path)
-    assert fm["watch_run_count"] == 3
-    assert isinstance(fm["watch_run_count"], int)
+    assert fm["watch_last_status"] == "ok"
 
     # --- 7. tick: not due yet (push next_run far into the future) ---------
     _override_next_run(page_path, "2099-01-01T00:00:00Z")

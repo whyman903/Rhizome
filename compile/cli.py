@@ -1782,25 +1782,45 @@ def watch_tick(
     json_output: bool,
 ) -> None:
     """Run every active watch whose next_run is due now."""
-    from compile.watch import ActiveWorkspaceUnavailable, resolve_active_workspace, tick
-    if path is not None:
-        # Explicit --path always wins, exactly as the other watch subcommands behave.
-        config = load_config(Path(path).resolve())
-    else:
-        try:
-            # Preserve the legacy `cd /path/to/wiki && compile watch tick` workflow.
-            config = load_config(Path.cwd())
-        except FileNotFoundError:
-            try:
-                workspace = resolve_active_workspace()
-            except ActiveWorkspaceUnavailable as exc:
-                raise click.UsageError(str(exc)) from exc
-            config = load_config(workspace)
-    events = tick(
-        config,
-        claude_executable=claude_executable,
-        claude_timeout=timeout_seconds,
+    from compile.watch import (
+        ActiveWorkspaceUnavailable,
+        log_tick_run,
+        resolve_active_workspace,
+        tick,
     )
+    config = None
+    workspace_for_log: Path | None = None
+    try:
+        if path is not None:
+            # Explicit --path always wins, exactly as the other watch subcommands behave.
+            workspace_for_log = Path(path).resolve()
+            config = load_config(workspace_for_log)
+        else:
+            try:
+                # Preserve the legacy `cd /path/to/wiki && compile watch tick` workflow.
+                config = load_config(Path.cwd())
+            except FileNotFoundError:
+                try:
+                    workspace_for_log = resolve_active_workspace()
+                except ActiveWorkspaceUnavailable as exc:
+                    raise click.UsageError(str(exc)) from exc
+                config = load_config(workspace_for_log)
+    except Exception as exc:
+        log_tick_run(
+            workspace=config.workspace_root if config else workspace_for_log,
+            error=str(exc),
+        )
+        raise
+    try:
+        events = tick(
+            config,
+            claude_executable=claude_executable,
+            claude_timeout=timeout_seconds,
+        )
+    except Exception as exc:
+        log_tick_run(workspace=config.workspace_root, error=str(exc))
+        raise
+    log_tick_run(workspace=config.workspace_root, events=events)
     if json_stream:
         for event in events:
             _emit_json({"event": event})

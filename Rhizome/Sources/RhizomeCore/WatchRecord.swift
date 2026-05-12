@@ -15,7 +15,6 @@ public struct WatchRecord: Codable, Equatable, Identifiable, Sendable {
     public let lastStatus: String?
     public let lastRun: String?
     public let nextRun: String?
-    public let runCount: Int
     public let consecutiveFailures: Int
     public let lastError: String?
 
@@ -32,7 +31,6 @@ public struct WatchRecord: Codable, Equatable, Identifiable, Sendable {
         case lastStatus = "last_status"
         case lastRun = "last_run"
         case nextRun = "next_run"
-        case runCount = "run_count"
         case consecutiveFailures = "consecutive_failures"
         case lastError = "last_error"
     }

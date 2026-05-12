@@ -6,7 +6,7 @@ Use this command when watches have been running for a while and the user wants a
 
 Workflow:
 
-1. Run `compile watch list --json-output` and read every watch record. Note `watch_status`, `last_status`, `consecutive_failures`, `run_count`, and `last_run`.
+1. Run `compile watch list --json-output` and read every watch record. Note `watch_status`, `last_status`, `consecutive_failures`, `last_run`, and `next_run`.
 
 2. For each watch, classify it into one of these buckets:
    - **Failing** — `watch_status: error` or `paused` because of `consecutive_failures >= 3`. The CLI auto-pauses these. Read `watch_last_error` and propose either a URL fix, an intent rewrite, or removal.

@@ -69,11 +69,11 @@ Set `RHIZOME_SKIP_LAUNCH=1` (or run under `CI`) to skip the post-build app launc
   - `CompileRunning.swift` (protocol), `CompileRunner.swift` (sidecar RPC), `CompileEvent.swift` (streamed ingest events), `WorkspaceInfo.swift`, `WikiSearch.swift`, `WikilinkParser.swift`.
   - `ClaudeQueryRunner.swift` (streaming `claude -p`), `QuerySession.swift` (resumable threads), `ClaudeDispatcher.swift` (Terminal hand-off).
   - `AppModel.swift`, `FeedStore.swift`, `Obsidian.swift` (URL scheme opener), `TerminalLauncher.swift`, `AppLogger.swift`.
-  - `WatchSidecar.swift` (RPC for `compile watch ...`), `WatchScheduler.swift` (registers the bundled `Contents/Library/LaunchAgents/app.rhizome.watch-tick.plist` via `SMAppService` and writes `~/Library/Application Support/Rhizome/active-workspace` so the static plist can locate the current workspace), `WatchRecord.swift` (Codable contract for the watch JSON envelopes).
+  - `WatchSidecar.swift` (RPC for `compile watch ...`), `WatchScheduler.swift` (generates a per-user LaunchAgent plist at `~/Library/LaunchAgents/app.rhizome.watch-tick.plist` with an absolute `Program` path to the bundled `compile-bin` and bootstraps it via `launchctl bootstrap gui/$UID`; writes `~/Library/Application Support/Rhizome/active-workspace` so the agent's `compile watch tick` invocation can locate the current workspace without baking a path into the plist), `WatchRecord.swift` (Codable contract for the watch JSON envelopes).
 - `Tests/RhizomeCoreTests/` and `Tests/RhizomeAppTests/` — Swift Testing suites covering the sidecar contract, query sessions, markdown rendering, and Obsidian/Terminal launch.
 - `support/compile-bin.spec` — PyInstaller spec for the `compile-bin` sidecar.
 - `support/Info.plist` / `AppIcon.icns` — bundle metadata.
-- `support/LaunchAgents/app.rhizome.watch-tick.plist` — static SMAppService agent plist; copied into `Rhizome.app/Contents/Library/LaunchAgents/` by `scripts/build.sh`. Uses `BundleProgram` so launchd resolves `compile-bin` relative to the bundle, and reads the active workspace from the pointer file (no `--path` baked in).
+- `support/LaunchAgents/app.rhizome.watch-tick.plist` — reference plist kept for documentation; the active agent is generated at runtime by `WatchScheduler` and installed at `~/Library/LaunchAgents/`. SMAppService + `BundleProgram` is intentionally not used: macOS 14+ rejects adhoc-signed bundled binaries with `OS_REASON_CODESIGNING` (launch-constraint violation).
 - `scripts/build.sh` — builds sidecar + Swift product, assembles and ad-hoc signs `dist/Rhizome.app`.
 
 ## Development Rules

@@ -17,7 +17,6 @@ final class WatchTests: XCTestCase {
           "last_status": null,
           "last_run": null,
           "next_run": "2026-05-07T09:00:00Z",
-          "run_count": 0,
           "consecutive_failures": 0,
           "last_error": null
         }
@@ -29,7 +28,6 @@ final class WatchTests: XCTestCase {
         XCTAssertEqual(record.url, "https://example.com")
         XCTAssertEqual(record.frequency, "daily")
         XCTAssertEqual(record.watchStatus, "active")
-        XCTAssertEqual(record.runCount, 0)
         XCTAssertNil(record.lastRun)
         XCTAssertEqual(record.nextRun, "2026-05-07T09:00:00Z")
     }
@@ -49,8 +47,8 @@ final class WatchTests: XCTestCase {
 
     /// `writePointer` is the only piece of `install()` we exercise from tests:
     /// `install()` would also bootout `~/Library/LaunchAgents/app.rhizome.watch-tick.plist`
-    /// and call SMAppService.register(), both of which can mutate real launchd
-    /// state on the developer's machine.
+    /// and bootstrap a real launchd agent, which can mutate launchd state on
+    /// the developer's machine.
     func testWritePointerStoresStandardizedWorkspacePath() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -103,7 +101,7 @@ final class WatchTests: XCTestCase {
 
         let fakeURL = tmpDir.appendingPathComponent("fake-compile.sh")
         let payload = """
-        {"ok":true,"watches":[{"watch_id":"x","title":"X","relative_path":"wiki/watches/X.md","url":"https://e.com","frequency":"daily","intent":"","watch_status":"active","last_status":null,"last_run":null,"next_run":null,"run_count":0,"consecutive_failures":0,"last_error":null}]}
+        {"ok":true,"watches":[{"watch_id":"x","title":"X","relative_path":"wiki/watches/X.md","url":"https://e.com","frequency":"daily","intent":"","watch_status":"active","last_status":null,"last_run":null,"next_run":null,"consecutive_failures":0,"last_error":null}]}
         """
         let script = """
         #!/bin/bash
@@ -179,7 +177,7 @@ final class WatchTests: XCTestCase {
         let fakeURL = tmpDir.appendingPathComponent("fake-compile-update.sh")
         let argsURL = tmpDir.appendingPathComponent("args.txt")
         let payload = """
-        {"ok":true,"watch":{"watch_id":"x","title":"X","relative_path":"wiki/watches/X.md","url":"https://e.com","frequency":"daily","intent":"Updated prompt","watch_status":"active","last_status":null,"last_run":null,"next_run":null,"run_count":0,"consecutive_failures":0,"last_error":null}}
+        {"ok":true,"watch":{"watch_id":"x","title":"X","relative_path":"wiki/watches/X.md","url":"https://e.com","frequency":"daily","intent":"Updated prompt","watch_status":"active","last_status":null,"last_run":null,"next_run":null,"consecutive_failures":0,"last_error":null}}
         """
         let script = """
         #!/bin/bash

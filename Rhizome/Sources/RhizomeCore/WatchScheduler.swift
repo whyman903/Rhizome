@@ -1,19 +1,26 @@
 import Foundation
 import ServiceManagement
 
-/// Registers the bundled launchd user agent that fires `compile watch tick`
-/// every 15 minutes via SMAppService.
+/// Installs the launchd user agent that fires `compile watch tick` every 15
+/// minutes.
 ///
-/// The plist is bundled inside `Rhizome.app/Contents/Library/LaunchAgents/` and
-/// runs the sidecar relative to the bundle (`BundleProgram`). It does *not*
-/// bake the workspace path into ProgramArguments — instead the Mac app writes
-/// ``activeWorkspacePointerURL`` whenever the user selects a workspace, and
-/// `compile watch tick` resolves it. This keeps the plist static (which
-/// SMAppService requires) and lets macOS attribute the background activity
-/// to "Rhizome" rather than to the raw `compile-bin` executable name.
+/// The agent is registered as a classic per-user LaunchAgent at
+/// `~/Library/LaunchAgents/app.rhizome.watch-tick.plist` with an absolute
+/// `Program` path pointing at the bundled `compile-bin`. The bundled
+/// `Contents/Library/LaunchAgents/...plist` is intentionally **not** used:
+/// SMAppService loads it as a `BundleProgram`, which on macOS 14+ triggers a
+/// launch-constraint check that rejects adhoc-signed executables with
+/// `OS_REASON_CODESIGNING`. Going through the user-domain LaunchAgent escapes
+/// the bundle-context constraint at the cost of attribution — macOS lists the
+/// background activity as "compile-bin" rather than "Rhizome".
+///
+/// The plist does not bake in a workspace path. The Mac app writes
+/// ``pointerURL`` (`~/Library/Application Support/Rhizome/active-workspace`)
+/// whenever the user opens a workspace, and `compile watch tick` resolves it
+/// when invoked without `--path`.
 public struct WatchScheduler: Sendable {
     public static let plistName = "app.rhizome.watch-tick.plist"
-    public static let legacyLabel = "app.rhizome.watch-tick"
+    public static let label = "app.rhizome.watch-tick"
 
     public let plistName: String
     public let pointerURL: URL
@@ -37,60 +44,34 @@ public struct WatchScheduler: Sendable {
             .appending(path: "active-workspace", directoryHint: .notDirectory)
     }
 
-    /// Write the active-workspace pointer file and register the bundled agent.
-    /// Idempotent — safe to call repeatedly across workspace switches and app
-    /// launches. Also clears any legacy `~/Library/LaunchAgents/app.rhizome.watch-tick.plist`
-    /// left over from pre-SMAppService installs so we don't double-fire.
+    /// Write the active-workspace pointer file and (re)install the user-domain
+    /// LaunchAgent. Re-bootstraps on every call so that an in-place rebuild of
+    /// `Rhizome.app` is picked up without manual `launchctl bootout`.
     public func install(workspaceURL: URL) throws {
         try writePointer(workspaceURL: workspaceURL)
-        removeLegacyAgentIfPresent()
-        let service = SMAppService.agent(plistName: plistName)
-        // Only `.notRegistered` should trigger register():
-        //   .enabled          — already running, register() throws kSMErrorAlreadyRegistered.
-        //   .requiresApproval — registered but the user disabled it in System Settings;
-        //                       calling register() again fights that explicit choice.
-        //   .notFound         — bundled plist is missing or invalid; let register() raise.
-        // The pointer rewrite above is enough to retarget the active workspace in every
-        // already-registered state.
-        switch service.status {
-        case .enabled:
-            logger?.log("WatchScheduler: already registered, refreshed pointer for \(workspaceURL.path)")
-            return
-        case .requiresApproval:
-            logger?.log("WatchScheduler: agent disabled in Login Items; refreshed pointer for \(workspaceURL.path)")
-            return
-        case .notRegistered, .notFound:
-            break
-        @unknown default:
-            break
-        }
-        do {
-            try service.register()
-            logger?.log("WatchScheduler: registered \(plistName) for \(workspaceURL.path)")
-        } catch {
-            logger?.log("WatchScheduler: register() failed — \(error.localizedDescription)")
-            throw error
-        }
+        unregisterSMAppServiceAgentIfPresent()
+
+        let programURL = try resolveProgramURL()
+        let plistURL = userAgentPlistURL()
+        try writeUserAgentPlist(at: plistURL, programURL: programURL)
+
+        bootoutUserAgent(plistURL: plistURL)
+        try bootstrapUserAgent(plistURL: plistURL)
+
+        logger?.log("WatchScheduler: bootstrapped \(plistName) program=\(programURL.path)")
     }
 
     /// Unregister the agent and clear the pointer file.
     public func uninstall() {
-        let service = SMAppService.agent(plistName: plistName)
-        do {
-            try service.unregister()
-            logger?.log("WatchScheduler: unregistered \(plistName)")
-        } catch {
-            logger?.log("WatchScheduler: unregister() failed — \(error.localizedDescription)")
-        }
+        let plistURL = userAgentPlistURL()
+        bootoutUserAgent(plistURL: plistURL)
+        try? FileManager.default.removeItem(at: plistURL)
+        unregisterSMAppServiceAgentIfPresent()
         try? FileManager.default.removeItem(at: pointerURL)
     }
 
     public var isRegistered: Bool {
-        SMAppService.agent(plistName: plistName).status == .enabled
-    }
-
-    public var status: SMAppService.Status {
-        SMAppService.agent(plistName: plistName).status
+        FileManager.default.fileExists(atPath: userAgentPlistURL().path)
     }
 
     /// Write the active-workspace pointer file. Pure filesystem op — no
@@ -106,21 +87,124 @@ public struct WatchScheduler: Sendable {
         try (resolved + "\n").write(to: pointerURL, atomically: true, encoding: .utf8)
     }
 
-    /// Bootout + delete the pre-SMAppService `~/Library/LaunchAgents/<label>.plist`
-    /// if a previous app install wrote one. Failures are logged and ignored —
-    /// this is a best-effort cleanup.
-    private func removeLegacyAgentIfPresent() {
-        let legacyURL = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: "Library/LaunchAgents/\(WatchScheduler.legacyLabel).plist", directoryHint: .notDirectory)
-        guard FileManager.default.fileExists(atPath: legacyURL.path) else { return }
+    // MARK: - Internals
+
+    enum WatchSchedulerError: Error, LocalizedError {
+        case sidecarNotFound(URL)
+        case bootstrapFailed(status: Int32, output: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .sidecarNotFound(let url):
+                return "Watch agent could not find compile-bin at \(url.path). Rebuild Rhizome.app."
+            case .bootstrapFailed(let status, let output):
+                return "launchctl bootstrap failed (status \(status)): \(output)"
+            }
+        }
+    }
+
+    private func userAgentPlistURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/LaunchAgents/\(plistName)", directoryHint: .notDirectory)
+    }
+
+    private func resolveProgramURL() throws -> URL {
+        let bundle = Bundle.main
+        // Bundle.main.executableURL is …/Contents/MacOS/Rhizome; walk up to Contents/.
+        guard let bundleExecutable = bundle.executableURL else {
+            throw WatchSchedulerError.sidecarNotFound(bundle.bundleURL)
+        }
+        let candidate = bundleExecutable
+            .deletingLastPathComponent()   // Contents/MacOS
+            .deletingLastPathComponent()   // Contents
+            .appending(path: "Resources/compile-bin", directoryHint: .notDirectory)
+        guard FileManager.default.isExecutableFile(atPath: candidate.path) else {
+            throw WatchSchedulerError.sidecarNotFound(candidate)
+        }
+        return candidate
+    }
+
+    private func writeUserAgentPlist(at plistURL: URL, programURL: URL) throws {
+        let directory = plistURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let dict: [String: Any] = [
+            "Label": WatchScheduler.label,
+            "Program": programURL.path,
+            "ProgramArguments": [
+                "compile-bin",
+                "watch",
+                "tick",
+                "--json-stream",
+            ],
+            "StartInterval": 900,
+            "RunAtLoad": false,
+            "ProcessType": "Background",
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: dict,
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: plistURL, options: .atomic)
+    }
+
+    private func bootoutUserAgent(plistURL: URL) {
+        guard FileManager.default.fileExists(atPath: plistURL.path) else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["bootout", "gui/\(getuid())", legacyURL.path]
+        process.arguments = ["bootout", "gui/\(getuid())", plistURL.path]
+        let stderrPipe = Pipe()
         process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try? process.run()
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            logger?.log("WatchScheduler: bootout failed to launch — \(error.localizedDescription)")
+        }
+    }
+
+    private func bootstrapUserAgent(plistURL: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["bootstrap", "gui/\(getuid())", plistURL.path]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
         process.waitUntilExit()
-        try? FileManager.default.removeItem(at: legacyURL)
-        logger?.log("WatchScheduler: removed legacy agent at \(legacyURL.path)")
+        guard process.terminationStatus == 0 else {
+            let stderr = (try? stderrPipe.fileHandleForReading.readToEnd())
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            throw WatchSchedulerError.bootstrapFailed(
+                status: process.terminationStatus,
+                output: stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+    }
+
+    /// Older builds registered the agent through SMAppService against the
+    /// bundled plist. That registration is broken on adhoc-signed dev builds
+    /// (launch-constraint violation) and must be cleared before the
+    /// user-domain agent can take over.
+    private func unregisterSMAppServiceAgentIfPresent() {
+        let service = SMAppService.agent(plistName: plistName)
+        switch service.status {
+        case .enabled, .requiresApproval:
+            do {
+                try service.unregister()
+                logger?.log("WatchScheduler: unregistered prior SMAppService agent")
+            } catch {
+                logger?.log("WatchScheduler: SMAppService unregister failed — \(error.localizedDescription)")
+            }
+        case .notRegistered, .notFound:
+            return
+        @unknown default:
+            return
+        }
     }
 }

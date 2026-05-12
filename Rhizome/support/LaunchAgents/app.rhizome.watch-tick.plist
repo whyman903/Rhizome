@@ -4,10 +4,14 @@
 <dict>
     <key>Label</key>
     <string>app.rhizome.watch-tick</string>
-    <key>AssociatedBundleIdentifiers</key>
-    <array>
-        <string>com.walkerhyman.rhizome</string>
-    </array>
+    <!--
+        AssociatedBundleIdentifiers is intentionally omitted: macOS 14+ enforces
+        a launch-constraint check that requires the bundled program to be
+        Team-ID-signed by the same team as the associated bundle. Adhoc-signed
+        local builds fail that check with OS_REASON_CODESIGNING and never run.
+        The cost is purely cosmetic — macOS attributes background activity to
+        "compile-bin" instead of "Rhizome".
+    -->
     <key>BundleProgram</key>
     <string>Contents/Resources/compile-bin</string>
     <key>ProgramArguments</key>

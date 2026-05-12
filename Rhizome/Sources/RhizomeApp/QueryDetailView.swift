@@ -8,6 +8,12 @@ enum QueryDetailPane {
     case settings
 }
 
+private struct ConversationScrollSnapshot: Equatable {
+    let sessionID: UUID
+    let turnCount: Int
+    let assistantTextLength: Int
+}
+
 struct QueryDetailView: View {
     @Bindable var model: AppModel
     @Bindable var watchesViewModel: WatchesViewModel
@@ -253,14 +259,18 @@ struct QueryDetailView: View {
                     .padding(.vertical, 24)
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .id(model.querySession.id)
                 .overlayScrollers()
-                .onChange(of: model.querySession.turns.count) {
-                    withAnimation {
+                .onChange(of: conversationScrollSnapshot) { oldValue, newValue in
+                    guard oldValue.sessionID == newValue.sessionID else { return }
+
+                    if newValue.turnCount > oldValue.turnCount {
+                        withAnimation {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    } else if newValue.assistantTextLength > oldValue.assistantTextLength {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
-                }
-                .onChange(of: model.querySession.assistantText) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
                 }
 
                 if isEmptyConversation {
@@ -271,6 +281,14 @@ struct QueryDetailView: View {
             }
             .background(EditorialPalette.background)
         }
+    }
+
+    private var conversationScrollSnapshot: ConversationScrollSnapshot {
+        ConversationScrollSnapshot(
+            sessionID: model.querySession.id,
+            turnCount: model.querySession.turns.count,
+            assistantTextLength: model.querySession.assistantText.count
+        )
     }
 
     private var isEmptyConversation: Bool {

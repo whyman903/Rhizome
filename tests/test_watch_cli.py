@@ -14,6 +14,11 @@ from compile.cli import main
 from compile.workspace import init_workspace
 
 
+@pytest.fixture(autouse=True)
+def isolate_tick_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(watch_module, "TICK_LOG_PATH", tmp_path / "watch-tick.log")
+
+
 def _make_workspace(tmp_path: Path) -> Path:
     init_workspace(tmp_path, "Watch CLI", "Smoke")
     return tmp_path
@@ -45,10 +50,11 @@ def test_watch_add_emits_stable_json_envelope(tmp_path: Path) -> None:
     record = payload["watch"]
     for key in (
         "watch_id", "title", "relative_path", "url", "frequency", "intent",
-        "watch_status", "last_status", "last_run", "next_run", "run_count",
+        "watch_status", "last_status", "last_run", "next_run",
         "consecutive_failures", "last_error",
     ):
         assert key in record
+    assert "run_count" not in record
     assert record["watch_status"] == "active"
     assert record["url"] == "https://example.com/feed"
 
@@ -159,6 +165,13 @@ def test_watch_tick_emits_one_event_per_due_watch(
     events = [json.loads(line)["event"] for line in result.output.strip().splitlines() if line.strip()]
     assert len(events) == 2
     assert all(e["status"] == "ok" for e in events)
+    log_lines = watch_module.TICK_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    assert len(log_lines) == 1
+    log_payload = json.loads(log_lines[0])
+    assert log_payload["status"] == "ok"
+    assert log_payload["workspace"] == str(tmp_path)
+    assert log_payload["count"] == 2
+    assert [event["status"] for event in log_payload["events"]] == ["ok", "ok"]
 
 
 def test_watch_tick_uses_cwd_workspace_when_no_path_given(
@@ -215,6 +228,11 @@ def test_watch_tick_errors_when_neither_cwd_nor_pointer_resolves(
     result = runner.invoke(main, ["watch", "tick", "--json-stream"])
     assert result.exit_code != 0
     assert "active workspace" in result.output.lower()
+    log_lines = watch_module.TICK_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    assert len(log_lines) == 1
+    log_payload = json.loads(log_lines[0])
+    assert log_payload["status"] == "error"
+    assert "active workspace" in log_payload["error"].lower()
 
 
 def test_resolve_active_workspace_rejects_missing_directory(

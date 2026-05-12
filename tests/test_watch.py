@@ -190,6 +190,35 @@ def test_update_watch_rewrites_prompt_frontmatter_body_and_state(tmp_path: Path)
     assert state_payload["watches"][0]["intent"] == "Updated prompt with a sharper monitoring goal."
 
 
+def test_watch_rewrite_strips_legacy_editorial_frontmatter(tmp_path: Path) -> None:
+    _make_workspace(tmp_path)
+    config = load_config(tmp_path)
+    record = watch_module.add_watch(
+        config,
+        url="https://example.com/a",
+        frequency="weekly",
+        intent="Original prompt.",
+        title="Legacy Fields",
+    )
+    page_path = tmp_path / record.relative_path
+    text = page_path.read_text()
+    text = text.replace(
+        "type: watch\n",
+        "type: watch\nstatus: seed\nsummary: Old generated summary.\nwatch_run_count: 7\n",
+        1,
+    )
+    page_path.write_text(text)
+
+    watch_module.update_watch(config, record.watch_id, intent="Updated prompt.")
+
+    page_text = page_path.read_text()
+    assert "status: seed" not in page_text
+    assert "summary: Old generated summary." not in page_text
+    assert "watch_run_count:" not in page_text
+    state_payload = json.loads((tmp_path / ".compile" / "watches.json").read_text())
+    assert "run_count" not in state_payload["watches"][0]
+
+
 def test_pause_then_resume_flips_status_and_clears_failures(tmp_path: Path) -> None:
     _make_workspace(tmp_path)
     config = load_config(tmp_path)
@@ -299,7 +328,6 @@ def test_run_watch_happy_path_appends_digest(tmp_path: Path, monkeypatch: pytest
     assert "- one" in page_text
     assert "synthesized" in page_text
     # Subsequent fields updated
-    assert "watch_run_count: 1" in page_text
     assert "watch_last_status: ok" in page_text
     # claude was invoked with --add-dir pointing at the wiki dir
     assert any("--add-dir" in a for a in invocations[0])
