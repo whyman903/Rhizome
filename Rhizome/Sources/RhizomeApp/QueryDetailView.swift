@@ -18,6 +18,8 @@ struct QueryDetailView: View {
     @State private var showingDeleted = false
     @State private var isInputFocused: Bool = false
     @State private var composerHeight: CGFloat = 17
+    @State private var draggingTabID: UUID?
+    @State private var dropTargetTabID: UUID?
 
     private let minSidebarWidth: CGFloat = 140
     private let defaultSidebarWidth: CGFloat = 260
@@ -159,11 +161,15 @@ struct QueryDetailView: View {
     private var tabStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(model.queryTabs) { session in
+                ForEach(Array(model.queryTabs.enumerated()), id: \.element.id) { index, session in
                     ConversationTab(
                         session: session,
                         isActive: session.id == model.querySession.id,
                         canClose: model.queryTabs.count > 1 || model.hasActiveQuerySession,
+                        shortcutIndex: index < 9 ? index + 1 : nil,
+                        isDropTarget: draggingTabID != nil
+                            && draggingTabID != session.id
+                            && dropTargetTabID == session.id,
                         onSelect: {
                             activePane = .conversation
                             model.selectQueryTab(session)
@@ -176,6 +182,22 @@ struct QueryDetailView: View {
                                 followUpText = ""
                                 activePane = .conversation
                             }
+                        },
+                        onDragStart: { draggingTabID = session.id },
+                        onDragEnd: {
+                            draggingTabID = nil
+                            dropTargetTabID = nil
+                        },
+                        onDropTargeted: { isTargeted in
+                            dropTargetTabID = isTargeted ? session.id : (dropTargetTabID == session.id ? nil : dropTargetTabID)
+                        },
+                        onDrop: { droppedID in
+                            defer {
+                                draggingTabID = nil
+                                dropTargetTabID = nil
+                            }
+                            guard droppedID != session.id else { return }
+                            model.moveQueryTab(id: droppedID, toIndex: index)
                         }
                     )
                 }
@@ -986,8 +1008,14 @@ private struct ConversationTab: View {
     @Bindable var session: QuerySession
     let isActive: Bool
     let canClose: Bool
+    let shortcutIndex: Int?
+    let isDropTarget: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onDragStart: () -> Void
+    let onDragEnd: () -> Void
+    let onDropTargeted: (Bool) -> Void
+    let onDrop: (UUID) -> Void
 
     @State private var isHovering = false
 
@@ -1030,16 +1058,21 @@ private struct ConversationTab: View {
             }
             .buttonStyle(.plain)
 
-            if canClose && (isHovering || isActive) {
+            if canClose && isHovering {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(EditorialPalette.textTertiary)
-                        .frame(width: 14, height: 14)
+                        .frame(width: 22, height: 14)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Close tab (⌘W)")
+            } else if let shortcutIndex {
+                Text("⌘\(shortcutIndex)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(EditorialPalette.textTertiary)
+                    .frame(width: 22, alignment: .trailing)
             }
         }
         .frame(width: 168, height: 24)
@@ -1050,7 +1083,7 @@ private struct ConversationTab: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(borderColor, lineWidth: 0.75)
+                .strokeBorder(borderColor, lineWidth: isDropTarget ? 1.5 : 0.75)
         )
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
@@ -1060,9 +1093,40 @@ private struct ConversationTab: View {
         .contextMenu {
             Button("Close Tab", action: onClose)
         }
+        .draggable(session.id.uuidString) {
+            dragPreview
+                .onAppear(perform: onDragStart)
+                .onDisappear(perform: onDragEnd)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let str = items.first, let uuid = UUID(uuidString: str) else { return false }
+            onDrop(uuid)
+            return true
+        } isTargeted: { targeted in
+            onDropTargeted(targeted)
+        }
+    }
+
+    private var dragPreview: some View {
+        Text(title)
+            .font(.system(size: 11.5, weight: .semibold, design: activeFont.design))
+            .foregroundStyle(EditorialPalette.textPrimary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(width: 168, height: 24)
+            .padding(.horizontal, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(EditorialPalette.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(EditorialPalette.borderHover, lineWidth: 0.75)
+            )
     }
 
     private var backgroundColor: Color {
+        if isDropTarget { return EditorialPalette.surfaceHover }
         if isActive { return EditorialPalette.surface }
         if isHovering { return EditorialPalette.surfaceHover.opacity(0.7) }
         return EditorialPalette.background.opacity(0.72)

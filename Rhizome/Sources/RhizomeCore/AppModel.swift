@@ -502,6 +502,19 @@ public final class AppModel {
         _ = selectExistingQueryTab(id: id)
     }
 
+    public func selectQueryTab(at index: Int) {
+        guard queryTabs.indices.contains(index) else { return }
+        selectQueryTab(id: queryTabs[index].id)
+    }
+
+    public func moveQueryTab(id: UUID, toIndex destination: Int) {
+        guard let source = queryTabs.firstIndex(where: { $0.id == id }) else { return }
+        let clamped = max(0, min(destination, queryTabs.count - 1))
+        if source == clamped { return }
+        let session = queryTabs.remove(at: source)
+        queryTabs.insert(session, at: clamped)
+    }
+
     public func closeActiveQueryTab() {
         closeQueryTab(id: querySession.id)
     }

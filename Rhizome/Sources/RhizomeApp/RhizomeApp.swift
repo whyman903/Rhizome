@@ -44,6 +44,9 @@ struct RhizomeApp: App {
                 }
                 .keyboardShortcut("t", modifiers: .command)
             }
+            CommandMenu("Tabs") {
+                TabSwitchCommands(model: model)
+            }
         }
 
         MenuBarExtra {
@@ -53,5 +56,24 @@ struct RhizomeApp: App {
             Image(nsImage: MenuBarIcon.template)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+private struct TabSwitchCommands: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        ForEach(Array(model.queryTabs.prefix(9).enumerated()), id: \.element.id) { index, session in
+            Button(menuTitle(index: index, session: session)) {
+                model.selectQueryTab(at: index)
+            }
+            .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+        }
+    }
+
+    private func menuTitle(index: Int, session: QuerySession) -> String {
+        let raw = session.firstQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = raw.isEmpty ? "New Query" : String(raw.prefix(40))
+        return "\(index + 1). \(title)"
     }
 }
